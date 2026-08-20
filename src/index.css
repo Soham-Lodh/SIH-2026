@@ -1,0 +1,32 @@
+@import "tailwindcss";
+
+/* Professional Polish Leaflet styling */
+.leaflet-container {
+  background-color: #f8fafc !important;
+  font-family: inherit;
+}
+
+.leaflet-disaster-tooltip {
+  background-color: rgba(255, 255, 255, 0.96) !important;
+  color: #0f172a !important;
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 10px !important;
+  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.15) !important;
+  padding: 8px 12px !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+}
+
+.leaflet-disaster-tooltip:before {
+  border-top-color: #cbd5e1 !important;
+}
+
+.custom-disaster-marker {
+  background: transparent !important;
+  border: none !important;
+}
+
+.custom-user-marker {
+  background: transparent !important;
+  border: none !important;
+}

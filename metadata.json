@@ -1,0 +1,6 @@
+{
+  "name": "Disaster Intelligence Platform",
+  "description": "Unified disaster intelligence platform for India featuring official SACHET alerts, 5-case geospatial relevance engine, historical research synthesis with Google News citations, and multilingual Indian language voice assistant.",
+  "requestFramePermissions": ["geolocation", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
