@@ -52,6 +52,196 @@ export function normalizeCategory(raw: string, eventName: string): DisasterCateg
   return 'General Alert';
 }
 
+const INDIA_BOUNDS = {
+  minLat: 6.0,
+  maxLat: 38.8,
+  minLng: 67.5,
+  maxLng: 98.8,
+};
+
+const STATE_CENTROIDS: Record<string, [number, number]> = {
+  'andaman and nicobar islands': [11.7401, 92.6586],
+  'andhra pradesh': [15.9129, 79.74],
+  'arunachal pradesh': [28.218, 94.7278],
+  assam: [26.2006, 92.9376],
+  bihar: [25.0961, 85.3131],
+  chhattisgarh: [21.2787, 81.8661],
+  goa: [15.2993, 74.124],
+  gujarat: [22.2587, 71.1924],
+  haryana: [29.0588, 76.0856],
+  'himachal pradesh': [31.1048, 77.1734],
+  jharkhand: [23.6102, 85.2799],
+  karnataka: [15.3173, 75.7139],
+  kerala: [10.8505, 76.2711],
+  ladakh: [34.1526, 77.577],
+  'madhya pradesh': [22.9734, 78.6569],
+  maharashtra: [19.7515, 75.7139],
+  manipur: [24.6637, 93.9063],
+  meghalaya: [25.467, 91.3662],
+  mizoram: [23.1645, 92.9376],
+  nagaland: [26.1584, 94.5624],
+  odisha: [20.9517, 85.0985],
+  punjab: [31.1471, 75.3412],
+  rajasthan: [27.0238, 74.2179],
+  sikkim: [27.533, 88.5122],
+  'tamil nadu': [11.1271, 78.6569],
+  telangana: [18.1124, 79.0193],
+  tripura: [23.9408, 91.9882],
+  uttarakhand: [30.0668, 79.0193],
+  'uttar pradesh': [26.8467, 80.9462],
+  'west bengal': [22.9868, 87.855],
+  delhi: [28.6139, 77.209],
+  'jammu and kashmir': [33.7782, 76.5762],
+  'dadra and nagar haveli and daman and diu': [20.3974, 72.8328],
+  'puducherry': [11.9416, 79.8083],
+};
+
+function isWithinIndiaBounds(lat: number, lng: number): boolean {
+  return lat >= INDIA_BOUNDS.minLat && lat <= INDIA_BOUNDS.maxLat && lng >= INDIA_BOUNDS.minLng && lng <= INDIA_BOUNDS.maxLng;
+}
+
+function deriveIndicativeCentroid(...parts: Array<string | undefined | null>): [number, number] | undefined {
+  const text = parts.filter(Boolean).join(' ').toLowerCase();
+  if (!text) return undefined;
+
+  for (const [needle, centroid] of Object.entries(STATE_CENTROIDS)) {
+    if (text.includes(needle)) {
+      return centroid;
+    }
+  }
+
+  if (text.includes('bhubaneswar') || text.includes('puri') || text.includes('cuttack')) return STATE_CENTROIDS.odisha;
+  if (text.includes('guwahati') || text.includes('kamrup') || text.includes('dibrugarh')) return STATE_CENTROIDS.assam;
+  if (text.includes('shimla') || text.includes('kullu') || text.includes('manali')) return STATE_CENTROIDS['himachal pradesh'];
+  if (text.includes('srinagar') || text.includes('jammu')) return STATE_CENTROIDS['jammu and kashmir'];
+  if (text.includes('mumbai') || text.includes('raigad') || text.includes('konkan')) return STATE_CENTROIDS.maharashtra;
+  if (text.includes('kozhikode') || text.includes('wayanad') || text.includes('thiruvananthapuram')) return STATE_CENTROIDS.kerala;
+  if (text.includes('ahmedabad') || text.includes('surat') || text.includes('kutch')) return STATE_CENTROIDS.gujarat;
+  if (text.includes('kolkata') || text.includes('sundarbans')) return STATE_CENTROIDS['west bengal'];
+  if (text.includes('chennai') || text.includes('madurai') || text.includes('tirunelveli')) return STATE_CENTROIDS['tamil nadu'];
+  if (text.includes('jaipur') || text.includes('bikaner') || text.includes('jaisalmer')) return STATE_CENTROIDS.rajasthan;
+  if (text.includes('delhi') || text.includes('ncr') || text.includes('gurugram')) return STATE_CENTROIDS.delhi;
+
+  const districtHints: Array<[string, [number, number]]> = [
+    ['arvalli', STATE_CENTROIDS.gujarat],
+    ['chhotaudepur', STATE_CENTROIDS.gujarat],
+    ['chhota udaipur', STATE_CENTROIDS.gujarat],
+    ['dahod', STATE_CENTROIDS.gujarat],
+    ['mahisagar', STATE_CENTROIDS.gujarat],
+    ['narmada', STATE_CENTROIDS.gujarat],
+    ['panch mahals', STATE_CENTROIDS.gujarat],
+    ['panchmahal', STATE_CENTROIDS.gujarat],
+    ['sabarkantha', STATE_CENTROIDS.gujarat],
+    ['sabar kantha', STATE_CENTROIDS.gujarat],
+    ['banaskantha', STATE_CENTROIDS.gujarat],
+    ['balrampur', STATE_CENTROIDS['chhattisgarh']],
+    ['bastar', STATE_CENTROIDS['chhattisgarh']],
+    ['bijapur', STATE_CENTROIDS['chhattisgarh']],
+    ['dantewada', STATE_CENTROIDS['chhattisgarh']],
+    ['koriya', STATE_CENTROIDS['chhattisgarh']],
+    ['manendragarh', STATE_CENTROIDS['chhattisgarh']],
+    ['sukma', STATE_CENTROIDS['chhattisgarh']],
+    ['surajpur', STATE_CENTROIDS['chhattisgarh']],
+    ['chengalpattu', STATE_CENTROIDS['tamil nadu']],
+    ['cuddalore', STATE_CENTROIDS['tamil nadu']],
+    ['kallakurichi', STATE_CENTROIDS['tamil nadu']],
+    ['kancheepuram', STATE_CENTROIDS['tamil nadu']],
+    ['pudukkottai', STATE_CENTROIDS['tamil nadu']],
+    ['sivaganga', STATE_CENTROIDS['tamil nadu']],
+    ['thanjavur', STATE_CENTROIDS['tamil nadu']],
+    ['thiruvarur', STATE_CENTROIDS['tamil nadu']],
+    ['viluppuram', STATE_CENTROIDS['tamil nadu']],
+    ['ariyalur', STATE_CENTROIDS['tamil nadu']],
+    ['karur', STATE_CENTROIDS['tamil nadu']],
+    ['alipurduar', STATE_CENTROIDS['west bengal']],
+    ['jalpaiguri', STATE_CENTROIDS['west bengal']],
+    ['north dinajpur', STATE_CENTROIDS['west bengal']],
+    ['south dinajpur', STATE_CENTROIDS['west bengal']],
+    ['uttar dinajpur', STATE_CENTROIDS['west bengal']],
+    ['dakshin dinajpur', STATE_CENTROIDS['west bengal']],
+    ['dehradun', STATE_CENTROIDS.uttarakhand],
+    ['tehri', STATE_CENTROIDS.uttarakhand],
+    ['uttarkashi', STATE_CENTROIDS.uttarakhand],
+    ['chamoli', STATE_CENTROIDS.uttarakhand],
+    ['rudraprayag', STATE_CENTROIDS.uttarakhand],
+    ['pithoragarh', STATE_CENTROIDS.uttarakhand],
+    ['east garo hills', STATE_CENTROIDS.meghalaya],
+    ['west garo hills', STATE_CENTROIDS.meghalaya],
+    ['east khasi hills', STATE_CENTROIDS.meghalaya],
+    ['west khasi hills', STATE_CENTROIDS.meghalaya],
+    ['west jaintia hills', STATE_CENTROIDS.meghalaya],
+    ['south west khasi hills', STATE_CENTROIDS.meghalaya],
+    ['ri bhoi', STATE_CENTROIDS.meghalaya],
+    ['bahraich', STATE_CENTROIDS['uttar pradesh']],
+    ['shravasti', STATE_CENTROIDS['uttar pradesh']],
+    ['saharanpur', STATE_CENTROIDS['uttar pradesh']],
+    ['sonbhadra', STATE_CENTROIDS['uttar pradesh']],
+    ['kamrup', STATE_CENTROIDS.assam],
+    ['sonitpur', STATE_CENTROIDS.assam],
+    ['dibrugarh', STATE_CENTROIDS.assam],
+    ['goalpara', STATE_CENTROIDS.assam],
+    ['barpeta', STATE_CENTROIDS.assam],
+    ['raigad', STATE_CENTROIDS.maharashtra],
+    ['ratnagiri', STATE_CENTROIDS.maharashtra],
+    ['sindhudurg', STATE_CENTROIDS.maharashtra],
+    ['wayanad', STATE_CENTROIDS.kerala],
+    ['idukki', STATE_CENTROIDS.kerala],
+    ['palakkad', STATE_CENTROIDS.kerala],
+    ['bhadrak', STATE_CENTROIDS.odisha],
+    ['balasore', STATE_CENTROIDS.odisha],
+    ['khordha', STATE_CENTROIDS.odisha],
+    ['kalahandi', STATE_CENTROIDS.odisha],
+    ['koraput', STATE_CENTROIDS.odisha],
+    ['jagatsinghpur', STATE_CENTROIDS.odisha],
+    ['kendrapara', STATE_CENTROIDS.odisha],
+    ['muzaffarpur', STATE_CENTROIDS.bihar],
+    ['sitamarhi', STATE_CENTROIDS.bihar],
+    ['madhubani', STATE_CENTROIDS.bihar],
+    ['patna', STATE_CENTROIDS.bihar],
+  ];
+
+  for (const [needle, centroid] of districtHints) {
+    if (text.includes(needle)) return centroid;
+  }
+
+  return undefined;
+}
+
+function isLikelyIndianEarthquake(place: string, lat: number, lng: number): boolean {
+  if (!isWithinIndiaBounds(lat, lng)) return false;
+
+  const text = place.toLowerCase();
+  const indianHints = [
+    'india',
+    'assam',
+    'bihar',
+    'gujarat',
+    'himachal pradesh',
+    'jammu and kashmir',
+    'karnataka',
+    'kerala',
+    'maharashtra',
+    'odisha',
+    'rajasthan',
+    'sikkim',
+    'tamil nadu',
+    'uttarakhand',
+    'west bengal',
+    'delhi',
+    'manipur',
+    'nagaland',
+    'mizoram',
+    'tripura',
+    'meghalaya',
+    'arunachal pradesh',
+    'andhra pradesh',
+    'telangana',
+    'punjab',
+  ];
+
+  return indianHints.some((hint) => text.includes(hint));
+}
+
 /**
  * Fetches real-time seismic events in India and surrounding fault boundaries (Lat 5-38°N, Lng 65-98°E)
  * from the official USGS Real-Time Earthquake GeoJSON API.
@@ -83,6 +273,10 @@ async function fetchUSGSIndianEarthquakes(): Promise<SachetAlert[]> {
       const timeMs = Number(props.time || Date.now());
       const sentTime = new Date(timeMs).toISOString();
       const expiryTime = new Date(timeMs + 48 * 3600 * 1000).toISOString();
+
+      if (!isLikelyIndianEarthquake(place, lat, lng)) {
+        continue;
+      }
 
       let severity: AlertSeverity = 'Minor';
       if (mag >= 5.5) severity = 'Extreme';
@@ -392,7 +586,15 @@ function parseCapAlert(root: any): SachetAlert[] {
     area.circle || area['cap:circle'],
   );
 
-  const centroid = calculateCentroid(polygon, circle);
+  const centroid =
+    calculateCentroid(polygon, circle) ||
+    deriveIndicativeCentroid(
+      asString(info.parameter?.state || info.parameter?.STATE),
+      asString(info.parameter?.district || info.parameter?.DISTRICT),
+      asString(area.areaDesc || area['cap:areaDesc']),
+      event,
+      rawCategory,
+    );
 
   const sent = asString(
     root.sent,
@@ -641,6 +843,12 @@ function parseCapPayload(rawContent: string): SachetAlert[] {
           areaDesc:
             title || 'Designated warning zone',
 
+          centroid: deriveIndicativeCentroid(
+            title,
+            description,
+            asString(item.source),
+          ),
+
           effective: sent,
 
           expires:
@@ -828,16 +1036,7 @@ export async function getSachetAlerts(clientEtag?: string): Promise<{
     await fetchUSGSIndianEarthquakes();
 
   /*
-   * 3. Open-Meteo telemetry.
-   *
-   * Kept for compatibility with the existing project.
-   * These are NOT represented as official SACHET alerts.
-   */
-  const meteoAlerts =
-    await fetchOpenMeteoIndianTelemetry();
-
-  /*
-   * 4. ONLY REAL/LIVE SOURCES.
+   * 3. ONLY REAL/LIVE SOURCES.
    *
    * The old getVerifiedSnapshotAlerts() has intentionally
    * been removed. Nothing is fabricated when an upstream
@@ -846,7 +1045,6 @@ export async function getSachetAlerts(clientEtag?: string): Promise<{
   const combinedAlerts: SachetAlert[] = [
     ...sachetLiveAlerts,
     ...usgsAlerts,
-    ...meteoAlerts,
   ];
 
   /*
@@ -911,10 +1109,9 @@ export async function getSachetAlerts(clientEtag?: string): Promise<{
     sourceUrl:
       PUBLIC_SACHET_FEED_URL,
 
-    liveSourceCount:
+      liveSourceCount:
       sachetLiveAlerts.length +
-      usgsAlerts.length +
-      meteoAlerts.length,
+      usgsAlerts.length,
   };
 
   return {

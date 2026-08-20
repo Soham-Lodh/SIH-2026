@@ -360,7 +360,7 @@ export function isAlertExpired(alert: SachetAlert, now: Date = new Date()): bool
 
 /**
  * Generates a deterministic plain-language summary string from official structured fields (Section 50).
- * Gemini is NEVER used to invent or rephrase core alert facts.
+ * The LLM is NEVER used to invent or rephrase core alert facts.
  */
 export function generatePlainLanguageSummary(alert: SachetAlert): string {
   const event = alert.event || alert.category || 'Disaster Alert';

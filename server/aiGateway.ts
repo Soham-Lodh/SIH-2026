@@ -1,4 +1,3 @@
-import { GoogleGenAI, Modality } from '@google/genai';
 import {
   EvidenceBundle,
   CitedSource,
@@ -7,166 +6,335 @@ import {
   NewsArticle,
   DisasterCategory,
 } from '../src/types/disaster';
+import type { HistoricalDisasterItem } from '../src/data/historicalDisasters';
 import { validateAndCleanCitations } from '../src/lib/evidenceUtils';
 import { searchGoogleNews } from './googleNews';
 
-let genAIClient: GoogleGenAI | null = null;
-
-function getAIClient(): GoogleGenAI | null {
-  if (!genAIClient && process.env.GEMINI_API_KEY) {
-    try {
-      genAIClient = new GoogleGenAI({
-        apiKey: process.env.GEMINI_API_KEY,
-        httpOptions: {
-          headers: {
-            'User-Agent': 'aistudio-build',
-          },
-        },
-      });
-    } catch (e) {
-      console.warn('Failed to initialize GoogleGenAI client:', (e as Error).message);
-    }
-  }
-  return genAIClient;
-}
-
-// In-memory model health & cooldown tracker
-const modelCooldownUntil: Record<string, number> = {
-  'gemini-3.7-flash': 0,
-  'gemini-3.1-flash-lite': 0,
-  'gemini-flash-latest': 0,
-};
-
-const ALL_CANDIDATE_MODELS = [
-  'gemini-3.7-flash',
-  'gemini-3.1-flash-lite',
-  'gemini-flash-latest',
+const evidenceBundleCache = new Map<string, { expiresAt: number; bundle: EvidenceBundle }>();
+const recentArchiveCache = new Map<string, { expiresAt: number; items: HistoricalDisasterItem[] }>();
+let recentArchiveWarmupStarted = false;
+const EVIDENCE_BUNDLE_CACHE_TTL_MS = 10 * 60 * 1000;
+const RECENT_ARCHIVE_CACHE_TTL_MS = 20 * 60 * 1000;
+type GroqKeyScope = 'default' | 'past' | 'pastFilters' | 'chat' | 'stt' | 'tts';
+const RECENT_ARCHIVE_QUERIES = [
+  'India flood',
+  'India cyclone',
+  'India earthquake',
+  'India landslide',
+  'India heavy rain',
+  'India heat wave',
+  'India thunderstorm',
+  'India lightning',
+  'India forest fire',
+  'India drought',
+  'India urban flood',
+  'India avalanche',
+];
+const INDIAN_STATES = [
+  'andaman and nicobar islands',
+  'andhra pradesh',
+  'arunachal pradesh',
+  'assam',
+  'bihar',
+  'chhattisgarh',
+  'goa',
+  'gujarat',
+  'haryana',
+  'himachal pradesh',
+  'jharkhand',
+  'karnataka',
+  'kerala',
+  'ladakh',
+  'madhya pradesh',
+  'maharashtra',
+  'manipur',
+  'meghalaya',
+  'mizoram',
+  'nagaland',
+  'odisha',
+  'punjab',
+  'rajasthan',
+  'sikkim',
+  'tamil nadu',
+  'telangana',
+  'tripura',
+  'uttarakhand',
+  'uttar pradesh',
+  'west bengal',
+  'delhi',
+  'jammu and kashmir',
+  'puducherry',
 ];
 
-/**
- * Transcribes spoken audio into text using Gemini 3.7 Flash multimodal capability.
- * Supports English and all major Indian languages (Hindi, Bengali, Tamil, Telugu, Odia, Marathi, Gujarati, etc.)
- */
-export async function transcribeAudio(
-  audioBase64: string,
-  mimeType: string = 'audio/webm'
-): Promise<string> {
-  const ai = getAIClient();
-  if (!ai) {
-    throw new Error('Gemini API is not configured or missing API key.');
-  }
-
-  // Strip any data URI prefix if present
-  const base64Data = audioBase64.replace(/^data:[^;]+;base64,/, '');
-
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.7-flash',
-      contents: [
-        {
-          inlineData: {
-            mimeType: mimeType.split(';')[0] || 'audio/webm',
-            data: base64Data,
-          },
-        },
-        {
-          text: 'You are an accurate voice speech-to-text transcriber for an emergency disaster response and intelligence platform. Transcribe the spoken audio verbatim into text accurately. If the user spoke in any Indian language (e.g. Hindi, Bengali, Tamil, Telugu, Marathi, Odia, Gujarati, Malayalam, Kannada, Punjabi, etc.) or English, output the exact transcribed speech in its accurate native script or language as spoken. Return ONLY the transcribed text with zero conversational commentary or prefixes.',
-        },
-      ],
-      config: {
-        temperature: 0.1,
-      },
-    });
-
-    return response.text?.trim() || '';
-  } catch (err) {
-    console.error('Audio transcription error in Gemini 3.7 Flash:', (err as Error).message);
-    throw err;
-  }
+function getGroqBaseUrl(): string {
+  return process.env.GROQ_BASE_URL?.trim() || 'https://api.groq.com/openai/v1';
 }
 
-/**
- * Executes a Gemini prompt with automatic fallback and cooldown logic across models.
- */
+function getGroqChatModels(): string[] {
+  return (process.env.GROQ_MODEL_FALLBACKS || process.env.GROQ_MODEL || 'llama-3.3-70b-versatile')
+    .split(',')
+    .map((model) => model.trim())
+    .filter(Boolean);
+}
+
+function getGroqSttModel(): string {
+  return process.env.GROQ_STT_MODEL?.trim() || 'whisper-large-v3-turbo';
+}
+
+function getGroqTtsModel(): string {
+  return process.env.GROQ_TTS_MODEL?.trim() || 'canopylabs/orpheus-v1-english';
+}
+
+function getGroqTtsVoice(): string {
+  return process.env.GROQ_TTS_VOICE?.trim() || 'austin';
+}
+
+export function isGroqConfigured(): boolean {
+  return Boolean(process.env.GROQ_API_KEY?.trim());
+}
+
+function getGroqKey(scope: GroqKeyScope = 'default'): string {
+  const scopeEnvMap: Record<Exclude<GroqKeyScope, 'default'>, string[]> = {
+    past: ['GROQ_API_KEY_PAST', 'GROQ_API_KEY_HISTORY', 'GROQ_API_KEY'],
+    pastFilters: ['GROQ_API_KEY_PAST_FILTERS', 'GROQ_API_KEY_FILTERED_PAST', 'GROQ_API_KEY_PAST', 'GROQ_API_KEY'],
+    chat: ['GROQ_API_KEY_CHAT', 'GROQ_API_KEY_ASSISTANT', 'GROQ_API_KEY'],
+    stt: ['GROQ_API_KEY_STT', 'GROQ_API_KEY_AUDIO', 'GROQ_API_KEY'],
+    tts: ['GROQ_API_KEY_TTS', 'GROQ_API_KEY_AUDIO', 'GROQ_API_KEY'],
+  };
+
+  const envNames =
+    scope === 'default'
+      ? ['GROQ_API_KEY']
+      : scopeEnvMap[scope];
+
+  for (const envName of envNames) {
+    const apiKey = process.env[envName]?.trim();
+    if (apiKey) return apiKey;
+  }
+
+  const label = scope === 'default' ? 'GROQ_API_KEY' : envNames.join(' or ');
+  throw new Error(`${label} is not configured.`);
+}
+
+function stripCodeFences(text: string): string {
+  return text
+    .trim()
+    .replace(/^```(?:json)?/i, '')
+    .replace(/```$/i, '')
+    .trim();
+}
+
+function inferDisasterType(text: string): DisasterCategory {
+  const lower = text.toLowerCase();
+  if (lower.includes('cyclone') || lower.includes('storm')) return 'Cyclone';
+  if (lower.includes('flood') || lower.includes('inundat') || lower.includes('waterlogging')) return 'Flood';
+  if (lower.includes('earthquake') || lower.includes('seismic') || lower.includes('tremor')) return 'Earthquake';
+  if (lower.includes('landslide') || lower.includes('mudslide') || lower.includes('rockfall')) return 'Landslide';
+  if (lower.includes('heat wave') || lower.includes('heatwave') || lower.includes('heat')) return 'Heat Wave';
+  if (lower.includes('thunderstorm')) return 'Thunderstorm';
+  if (lower.includes('lightning')) return 'Lightning';
+  if (lower.includes('heavy rain') || lower.includes('rain')) return 'Heavy Rain';
+  if (lower.includes('forest fire') || lower.includes('wildfire')) return 'Forest Fire';
+  if (lower.includes('drought')) return 'Drought';
+  if (lower.includes('avalanche')) return 'Avalanche';
+  return 'General Alert';
+}
+
+function inferState(text: string): string {
+  const lower = text.toLowerCase();
+  for (const state of INDIAN_STATES) {
+    if (lower.includes(state)) {
+      return state.replace(/\b\w/g, (c) => c.toUpperCase());
+    }
+  }
+
+  if (lower.includes('odisha') || lower.includes('puri') || lower.includes('bhubaneswar')) return 'Odisha';
+  if (lower.includes('kerala') || lower.includes('wayanad') || lower.includes('kochi')) return 'Kerala';
+  if (lower.includes('assam') || lower.includes('guwahati')) return 'Assam';
+  if (lower.includes('tamil nadu') || lower.includes('chennai')) return 'Tamil Nadu';
+  if (lower.includes('maharashtra') || lower.includes('mumbai')) return 'Maharashtra';
+  if (lower.includes('uttarakhand') || lower.includes('dehradun')) return 'Uttarakhand';
+  if (lower.includes('himachal') || lower.includes('shimla')) return 'Himachal Pradesh';
+  if (lower.includes('rajasthan') || lower.includes('jaipur')) return 'Rajasthan';
+  if (lower.includes('gujarat') || lower.includes('ahmedabad')) return 'Gujarat';
+  if (lower.includes('west bengal') || lower.includes('kolkata')) return 'West Bengal';
+  if (lower.includes('delhi') || lower.includes('ncr')) return 'Delhi';
+
+  return 'India';
+}
+
+function inferLocation(text: string, fallbackState: string): string {
+  const lower = text.toLowerCase();
+  const separators = [',', ' - ', ' near ', ' in '];
+  for (const sep of separators) {
+    const idx = lower.indexOf(sep);
+    if (idx > 0) {
+      const raw = text.slice(0, idx).trim();
+      if (raw.length >= 3) return raw;
+    }
+  }
+
+  if (fallbackState !== 'India') return fallbackState;
+  return 'India';
+}
+
+function toBase64(buffer: ArrayBuffer | Uint8Array): string {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  return Buffer.from(bytes).toString('base64');
+}
+
+async function groqChatCompletion(params: {
+  messages: { role: 'system' | 'user' | 'assistant'; content: string }[];
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
+  keyScope?: GroqKeyScope;
+}): Promise<string> {
+  const apiKey = getGroqKey(params.keyScope || 'default');
+  const baseUrl = getGroqBaseUrl();
+  let lastError: Error | null = null;
+
+  for (const model of [params.model, ...getGroqChatModels()].filter(Boolean)) {
+    try {
+      const response = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model,
+          messages: params.messages,
+          temperature: params.temperature ?? 0.2,
+          ...(params.maxTokens ? { max_completion_tokens: params.maxTokens } : {}),
+        }),
+      });
+
+      if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        throw new Error(`Groq chat completion failed for ${model}: HTTP ${response.status} ${text}`.trim());
+      }
+
+      const data = await response.json();
+      const content = data?.choices?.[0]?.message?.content;
+      if (typeof content === 'string' && content.trim()) {
+        return content.trim();
+      }
+
+      throw new Error(`Groq chat completion returned an empty response for ${model}.`);
+    } catch (error) {
+      lastError = error as Error;
+    }
+  }
+
+  throw lastError || new Error('Groq chat completion failed.');
+}
+
+export async function transcribeAudio(audioBase64: string, mimeType: string = 'audio/webm'): Promise<string> {
+  const apiKey = getGroqKey('stt');
+  const baseUrl = getGroqBaseUrl();
+  const sttModel = getGroqSttModel();
+  const base64Data = audioBase64.replace(/^data:[^;]+;base64,/, '');
+  const audioBuffer = Buffer.from(base64Data, 'base64');
+  const form = new FormData();
+  form.append('file', new Blob([audioBuffer], { type: mimeType.split(';')[0] || 'audio/webm' }), 'audio.webm');
+  form.append('model', sttModel);
+  form.append('response_format', 'json');
+  form.append('temperature', '0');
+  form.append(
+    'prompt',
+    'Transcribe the spoken disaster query accurately in the same language/script as spoken. Return only the transcription text.',
+  );
+
+  const response = await fetch(`${baseUrl}/audio/transcriptions`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: form,
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`Groq transcription failed: HTTP ${response.status} ${text}`.trim());
+  }
+
+  const data = await response.json();
+  return String(data?.text || '').trim();
+}
+
 export async function generateWithFallback(params: {
   prompt: string;
   systemInstruction?: string;
   responseMimeType?: string;
+  keyScope?: GroqKeyScope;
 }): Promise<string | null> {
-  const ai = getAIClient();
-  if (!ai) return null;
-
-  const now = Date.now();
-
-  // Prioritize models that are not currently under cooldown
-  const sortedModels = [...ALL_CANDIDATE_MODELS].sort((a, b) => {
-    const aCool = (modelCooldownUntil[a] || 0) > now ? 1 : 0;
-    const bCool = (modelCooldownUntil[b] || 0) > now ? 1 : 0;
-    return aCool - bCool;
-  });
-
-  for (const modelName of sortedModels) {
-    try {
-      const response = await ai.models.generateContent({
-        model: modelName,
-        contents: params.prompt,
-        config: {
-          systemInstruction: params.systemInstruction,
-          responseMimeType: params.responseMimeType,
-          temperature: 0.2, // Low temperature for factual precision
-        },
-      });
-
-      if (response && response.text) {
-        // Reset cooldown on success
-        modelCooldownUntil[modelName] = 0;
-        return response.text;
-      }
-    } catch (err) {
-      const errMsg = (err as Error).message || '';
-      console.warn(`Model ${modelName} notice: ${errMsg}`);
-
-      // If 503 (high demand) or 429 (rate limit), cool down model for 60 seconds
-      if (errMsg.includes('503') || errMsg.includes('429') || errMsg.includes('demand') || errMsg.includes('UNAVAILABLE')) {
-        modelCooldownUntil[modelName] = Date.now() + 60000;
-      }
-    }
+  try {
+    return await groqChatCompletion({
+      messages: [
+        ...(params.systemInstruction
+          ? [{ role: 'system' as const, content: params.systemInstruction }]
+          : []),
+        { role: 'user', content: params.prompt },
+      ],
+      temperature: params.responseMimeType === 'application/json' ? 0.1 : 0.2,
+      keyScope: params.keyScope,
+    });
+  } catch (error) {
+    console.warn('Groq generation failed:', (error as Error).message);
+    return null;
   }
-
-  return null;
 }
 
-/**
- * Searches and synthesizes a full Historical Disaster EvidenceBundle from Google News sources.
- */
 export async function buildHistoricalEvidenceBundle(
   userQuery: string,
   categoryFilter?: string,
-  stateFilter?: string
+  stateFilter?: string,
 ): Promise<EvidenceBundle> {
-  // Step 1: Search Planning & Query Expansion (Section 12, 14)
   const baseQuery = userQuery.trim();
-  const searchQueries = [
-    baseQuery,
-    `${baseQuery} casualties damage`,
-    `${baseQuery} evacuation rescue relief`,
-  ];
+  const cacheKey = JSON.stringify({
+    baseQuery: baseQuery.toLowerCase(),
+    categoryFilter: categoryFilter || '',
+    stateFilter: stateFilter || '',
+  });
 
-  // Step 2: Retrieve Google News articles
+  const cached = evidenceBundleCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.bundle;
+  }
+
+  const searchQueries = Array.from(
+    new Set(
+      [
+        baseQuery,
+        `${baseQuery} India`,
+        `${baseQuery} India disaster`,
+        `${baseQuery} casualties damage`,
+        `${baseQuery} evacuation rescue relief`,
+        categoryFilter ? `${baseQuery} ${categoryFilter} India` : '',
+        stateFilter ? `${baseQuery} ${stateFilter} India` : '',
+      ].filter(Boolean),
+    ),
+  );
+
   const allArticles: NewsArticle[] = [];
   for (const q of searchQueries) {
     const res = await searchGoogleNews(q, { isCurrentNews: false, maxResults: 4 });
     allArticles.push(...res);
   }
 
-  // Deduplicate and assign stable Citation IDs [S1], [S2], [S3]... (Section 19)
   const uniqueArticlesMap = new Map<string, NewsArticle>();
   for (const art of allArticles) {
-    if (!uniqueArticlesMap.has(art.title.toLowerCase().trim())) {
-      uniqueArticlesMap.set(art.title.toLowerCase().trim(), art);
+    const key = art.title.toLowerCase().trim();
+    if (!uniqueArticlesMap.has(key)) {
+      uniqueArticlesMap.set(key, art);
     }
   }
+
   const sourcesList = Array.from(uniqueArticlesMap.values()).slice(0, 6);
+  if (!sourcesList.length) {
+    throw new Error('No live Google News sources were found for this query.');
+  }
 
   const citedSources: CitedSource[] = sourcesList.map((art, idx) => ({
     id: `S${idx + 1}`,
@@ -178,7 +346,6 @@ export async function buildHistoricalEvidenceBundle(
     qualityScore: 90 - idx * 5,
   }));
 
-  // Step 3: Synthesis prompt for Gemini
   const sourcesText = citedSources
     .map((s) => `[${s.id}] Title: ${s.title}\nPublisher: ${s.publisher} (${s.publishedAt})\nSummary: ${s.summary}\nURL: ${s.url}`)
     .join('\n\n');
@@ -193,43 +360,32 @@ ABSOLUTE RULES:
 5. Return JSON matching the requested schema.`;
 
   const prompt = `User Query: "${baseQuery}"
+Category Filter: ${categoryFilter || 'None'}
+State Filter: ${stateFilter || 'None'}
 Retrieved Sources:
 ${sourcesText}
 
 Produce a structured historical evidence synthesis in JSON format:
 {
-  "eventName": "Clear event name (e.g. Extremely Severe Cyclonic Storm Fani)",
+  "eventName": "Clear event name",
   "disasterType": "Cyclone | Flood | Earthquake | Landslide | Heavy Rain | Heat Wave | General Alert",
   "location": "Affected City/District",
-  "state": "State name (e.g. Odisha, Kerala)",
+  "state": "State name",
   "country": "India",
-  "dateRange": "Date or range (e.g. May 2 - May 5, 2019)",
-  "reportedCasualties": "Reported human loss with citations (e.g. 64 fatalities reported in Odisha [S2])",
+  "dateRange": "Date or range",
+  "reportedCasualties": "Reported human loss with citations",
   "reportedDamage": "Summary of infrastructure and economic loss with citations",
   "whatHappened": "Paragraph synthesizing the disaster event with citations",
   "affectedAreas": "Geographic districts and communities impacted with citations",
   "humanImpact": "Detailed human displacement, casualties, and injuries with citations",
   "infrastructureDamage": "Power, roads, telecommunications, housing loss with citations",
   "economicImpact": "Agricultural, business, and monetary loss with citations",
-  "governmentResponse": "Evacuation operations, state emergency declarations, NDRF deployment with citations",
+  "governmentResponse": "Evacuation operations, emergency declarations, deployments with citations",
   "rescueRelief": "Shelter provisioning, ration distribution, medical aid with citations",
-  "recovery": "Reconstruction, power grid restoration, and long-term rebuilding with citations",
+  "recovery": "Reconstruction, utility restoration, long-term rebuilding with citations",
   "sourceAssessment": "Objective assessment of source reliability and coverage completeness",
-  "conflictingReports": [
-    {
-      "topic": "Topic of conflict",
-      "details": "What source A says vs source B",
-      "sources": ["S1", "S2"]
-    }
-  ],
-  "timeline": [
-    {
-      "date": "Date string",
-      "event": "Short title",
-      "description": "Description with citations",
-      "citations": ["S1"]
-    }
-  ]
+  "conflictingReports": [{"topic": "Topic", "details": "Conflict summary", "sources": ["S1", "S2"]}],
+  "timeline": [{"date": "Date string", "event": "Short title", "description": "Description with citations", "citations": ["S1"]}]
 }`;
 
   let synthesizedData: any = null;
@@ -239,21 +395,20 @@ Produce a structured historical evidence synthesis in JSON format:
       prompt,
       systemInstruction,
       responseMimeType: 'application/json',
+      keyScope: categoryFilter || stateFilter ? 'pastFilters' : 'past',
     });
 
     if (rawJson) {
-      synthesizedData = JSON.parse(rawJson);
+      synthesizedData = JSON.parse(stripCodeFences(rawJson));
     }
   } catch (err) {
-    console.warn('AI synthesis fallback:', (err as Error).message);
+    console.warn('Groq synthesis parse failure:', (err as Error).message);
   }
 
-  // Fallback deterministic synthesis if AI is offline or quota-limited (Section 78, 105)
   if (!synthesizedData) {
     synthesizedData = buildDeterministicFallbackSynthesis(baseQuery, citedSources);
   }
 
-  // Section 23 / 94: Clean and validate citations against available sources
   const whatHappened = validateAndCleanCitations(synthesizedData.whatHappened || '', citedSources);
   const affectedAreas = validateAndCleanCitations(synthesizedData.affectedAreas || '', citedSources);
   const humanImpact = validateAndCleanCitations(synthesizedData.humanImpact || '', citedSources);
@@ -298,20 +453,20 @@ Produce a structured historical evidence synthesis in JSON format:
       },
       {
         date: 'Day 2',
-        event: 'Landfall / Peak Impact',
+        event: 'Peak Impact',
         description: `Peak impact recorded in media reports [${citedSources[1]?.id || citedSources[0]?.id || 'S1'}].`,
         citations: citedSources[1] ? [citedSources[1].id] : [],
       },
     ],
-    whatHappened: whatHappened || (citedSources[0] ? `${citedSources[0].summary} [${citedSources[0].id}]` : 'Information synthesized from media records.'),
-    affectedAreas: affectedAreas || 'Coastal and riverine districts documented in source coverage.',
+    whatHappened: whatHappened || `${citedSources[0].summary} [${citedSources[0].id}]`,
+    affectedAreas: affectedAreas || 'Districts and communities documented in source coverage.',
     humanImpact: humanImpact || 'Displacement and community disruption documented in cited journalism.',
-    infrastructureDamage: infrastructureDamage || 'Electrical grid, highway corridors, and residential structural impacts reported.',
+    infrastructureDamage: infrastructureDamage || 'Electrical grid, highway corridors, and residential impacts reported.',
     economicImpact: economicImpact || 'Monetary losses and agricultural impacts reported across regional sectors.',
     governmentResponse: governmentResponse || 'State Disaster Management Authority and NDRF mobilization recorded.',
     rescueRelief: rescueRelief || 'Shelter operations, dry food packets, and medical deployment.',
     recovery: recovery || 'Long-term rehabilitation and infrastructure reconstruction initiatives.',
-    sourceAssessment: synthesizedData.sourceAssessment || `Retrieved ${citedSources.length} verified news and government records. Historical media archive coverage is synthesized with direct attribution.`,
+    sourceAssessment: synthesizedData.sourceAssessment || `Retrieved ${citedSources.length} verified news and government records.`,
     conflictingReports: cleanConflicts,
     synthesizedAt: new Date().toISOString(),
     evidenceStatus: citedSources.length >= 3 ? 'High Confidence' : 'Moderate Evidence',
@@ -322,7 +477,270 @@ Produce a structured historical evidence synthesis in JSON format:
     },
   };
 
+  evidenceBundleCache.set(cacheKey, {
+    expiresAt: Date.now() + EVIDENCE_BUNDLE_CACHE_TTL_MS,
+    bundle,
+  });
+
   return bundle;
+}
+
+const RECENT_ARCHIVE_SEARCHES = [
+  'Kerala flood 2024 India',
+  'Assam flood 2024 India',
+  'Himachal Pradesh landslide 2024 India',
+  'Wayanad landslide 2024 India',
+  'Sikkim earthquake 2023 India',
+  'Odisha cyclone 2024 India',
+  'Maharashtra flood 2024 India',
+  'Delhi heat wave 2024 India',
+  'Rajasthan flood 2024 India',
+  'Tamil Nadu cyclone 2024 India',
+  'Karnataka rain flood 2024 India',
+  'Bihar flood 2024 India',
+  'West Bengal flood 2024 India',
+  'Uttarakhand landslide 2024 India',
+  'Punjab flood 2024 India',
+  'Gujarat heat wave 2024 India',
+  'Andhra Pradesh cyclone 2024 India',
+  'Telangana flood 2024 India',
+  'Goa heavy rain 2024 India',
+  'Arunachal Pradesh landslide 2024 India',
+  'Meghalaya flood 2024 India',
+  'Mizoram landslide 2024 India',
+  'Nagaland heavy rain 2024 India',
+  'Chhattisgarh forest fire 2024 India',
+  'Ladakh avalanche 2024 India',
+  'Jammu Kashmir snow avalanche 2024 India',
+  'Madhya Pradesh flood 2024 India',
+  'Uttar Pradesh flood 2024 India',
+  'West Bengal cyclone 2024 India',
+  'Bengaluru urban flood 2024 India',
+  'Tripura flood 2024 India',
+  'Jammu Kashmir flood 2024 India',
+  'Sikkim landslide 2024 India',
+  'Odisha heat wave 2024 India',
+  'Haryana heat wave 2024 India',
+];
+
+function buildArchiveQueryPool(options?: {
+  categoryFilter?: string;
+  stateFilter?: string;
+  decadeFilter?: string;
+  limit?: number;
+}): string[] {
+  const limit = Math.max(options?.limit || 30, 1);
+  const category = options?.categoryFilter?.trim() || '';
+  const state = options?.stateFilter?.trim() || '';
+  const decade = options?.decadeFilter?.trim() || '';
+  const decadeYearHints: Record<string, string[]> = {
+    '1990s': ['1993', '1998', '1999'],
+    '2000s': ['2001', '2004', '2008', '2009'],
+    '2010s': ['2013', '2014', '2015', '2018', '2019'],
+    '2020s': ['2020', '2021', '2022', '2023', '2024', '2025', '2026'],
+  };
+
+  const searchRoots = [
+    category && state ? `${state} ${category}` : '',
+    state ? `${state} disaster` : '',
+    category ? `India ${category}` : '',
+    state && decade ? `${state} ${decade}` : '',
+  ].filter(Boolean);
+
+  const targeted = searchRoots.flatMap((root) => {
+    const hints = decadeYearHints[decade] || ['2024', '2025', '2026'];
+    return [
+      `${root} India`,
+      `${root} flood India`,
+      `${root} disaster India`,
+      ...hints.slice(0, 3).map((year) => `${root} ${year} India`),
+    ];
+  });
+
+  const combined = [...targeted, ...RECENT_ARCHIVE_SEARCHES];
+  const deduped: string[] = [];
+  const seen = new Set<string>();
+
+  for (const query of combined) {
+    const key = query.toLowerCase().trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(query);
+    if (deduped.length >= limit + 10) break;
+  }
+
+  return deduped;
+}
+
+function bundleToArchiveItem(bundle: EvidenceBundle, index: number): HistoricalDisasterItem {
+  const year = Number(bundle.dateRange?.match(/\b(19\d\d|20\d\d)\b/)?.[0] || new Date(bundle.synthesizedAt).getFullYear());
+  return {
+    ...bundle,
+    year,
+    numericCasualties: Number(bundle.reportedCasualties?.match(/(\d[\d,]*)/)?.[1]?.replace(/,/g, '') || 0),
+    decade: year < 2000 ? '1990s' : year < 2010 ? '2000s' : year < 2020 ? '2010s' : '2020s',
+    id: bundle.id || `archive-${index}`,
+  };
+}
+
+function makeArchiveTimeline(sources: CitedSource[]): TimelineEvent[] {
+  if (sources.length === 0) {
+    return [
+      {
+        date: 'Recorded period',
+        event: 'Event summary unavailable',
+        description: 'No archived source timeline could be synthesized.',
+        citations: [],
+      },
+    ];
+  }
+
+  return sources.map((source, idx) => ({
+    date: new Date(source.publishedAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }),
+    event: source.title.slice(0, 48),
+    description: `${source.summary} [${source.id}]`,
+    citations: [source.id],
+  }));
+}
+
+async function buildArchiveEvidenceBundle(query: string, index: number): Promise<HistoricalDisasterItem | null> {
+  const articles = await searchGoogleNews(query, { isCurrentNews: false, maxResults: 3 });
+  const sourcesList = articles.slice(0, 3);
+
+  if (!sourcesList.length) {
+    return null;
+  }
+
+  const citedSources: CitedSource[] = sourcesList.map((art, idx) => ({
+    id: `S${idx + 1}`,
+    title: art.title,
+    publisher: art.publisher,
+    publishedAt: art.publishedAt,
+    url: art.url,
+    summary: art.summary,
+    qualityScore: 90 - idx * 5,
+  }));
+
+  const joinedText = [query, ...citedSources.map((s) => `${s.title} ${s.summary}`)].join(' ');
+  const disasterType = inferDisasterType(joinedText);
+  const state = inferState(joinedText);
+  const location = inferLocation(joinedText, state);
+  const topSource = citedSources[0];
+  const year = Number(new Date(topSource.publishedAt).getFullYear() || new Date().getFullYear());
+
+  const bundle: EvidenceBundle = {
+    id: `ev-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+    eventName: topSource.title.replace(/^\d{4}\s*[-:]\s*/, '') || query,
+    disasterType,
+    location,
+    state,
+    country: 'India',
+    dateRange: new Date(topSource.publishedAt).toLocaleDateString('en-IN', {
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric',
+    }),
+    reportedCasualties: 'Information unavailable in the retrieved sources.',
+    reportedDamage: 'Information unavailable in the retrieved sources.',
+    sources: citedSources,
+    timeline: makeArchiveTimeline(citedSources),
+    whatHappened: citedSources.map((s) => `${s.summary} [${s.id}]`).join(' '),
+    affectedAreas: `Coverage indicates ${state} and nearby affected districts were discussed in the retrieved sources.`,
+    humanImpact: 'Human impact details were referenced in the retrieved source coverage.',
+    infrastructureDamage: 'Infrastructure damage details were not clearly quantified in the retrieved source coverage.',
+    economicImpact: 'Economic impact figures were not clearly quantified in the retrieved source coverage.',
+    governmentResponse: 'Official response details were summarized in the retrieved source coverage.',
+    rescueRelief: 'Rescue and relief information was referenced in the retrieved source coverage.',
+    recovery: 'Recovery details were not clearly quantified in the retrieved source coverage.',
+    sourceAssessment: `Synthesized from ${citedSources.length} live news sources indexed for the archive.`,
+    conflictingReports: [],
+    synthesizedAt: new Date().toISOString(),
+    evidenceStatus: citedSources.length >= 2 ? 'High Confidence' : 'Moderate Evidence',
+    retrievalMetadata: {
+      queriesExecuted: [query],
+      rawSourcesCount: articles.length,
+      dedupedSourcesCount: citedSources.length,
+    },
+  };
+
+  return bundleToArchiveItem(bundle, index);
+}
+
+export async function buildRecentIndiaArchive(limit: number = 30, options?: {
+  categoryFilter?: string;
+  stateFilter?: string;
+  decadeFilter?: string;
+}): Promise<HistoricalDisasterItem[]> {
+  const cacheKey = JSON.stringify({
+    limit,
+    categoryFilter: options?.categoryFilter || '',
+    stateFilter: options?.stateFilter || '',
+    decadeFilter: options?.decadeFilter || '',
+  });
+  const cached = recentArchiveCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.items;
+  }
+
+  const queries = buildArchiveQueryPool({ ...options, limit });
+  const archive: HistoricalDisasterItem[] = [];
+  const seen = new Set<string>();
+  const concurrency = 4;
+
+  for (let i = 0; i < queries.length; i += concurrency) {
+    const batch = queries.slice(i, i + concurrency);
+    const batchResults = await Promise.allSettled(
+      batch.map((query, offset) => buildArchiveEvidenceBundle(query, i + offset))
+    );
+
+    for (const result of batchResults) {
+      if (result.status !== 'fulfilled' || !result.value) continue;
+      const item = result.value;
+      const dedupeKey = `${item.eventName.toLowerCase()}|${item.state.toLowerCase()}|${item.dateRange.toLowerCase()}`;
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+      archive.push(item);
+      if (archive.length >= limit) break;
+    }
+
+    if (archive.length >= limit) break;
+  }
+
+  let sorted = archive.sort((a, b) => b.year - a.year);
+
+  if (options?.categoryFilter && options.categoryFilter !== 'all') {
+    const category = options.categoryFilter.toLowerCase();
+    sorted = sorted.filter((item) => item.disasterType.toLowerCase().includes(category));
+  }
+
+  if (options?.stateFilter && options.stateFilter !== 'All States') {
+    const state = options.stateFilter.toLowerCase();
+    sorted = sorted.filter((item) => item.state.toLowerCase().includes(state) || item.location.toLowerCase().includes(state));
+  }
+
+  if (options?.decadeFilter && options.decadeFilter !== 'all') {
+    sorted = sorted.filter((item) => item.decade === options.decadeFilter);
+  }
+
+  sorted = sorted.slice(0, limit);
+
+  recentArchiveCache.set(cacheKey, {
+    expiresAt: Date.now() + RECENT_ARCHIVE_CACHE_TTL_MS,
+    items: sorted,
+  });
+  return sorted;
+}
+
+export function warmRecentIndiaArchive(limit: number = 30): void {
+  if (recentArchiveWarmupStarted) {
+    return;
+  }
+
+  recentArchiveWarmupStarted = true;
+  void buildRecentIndiaArchive(limit).catch((error) => {
+    recentArchiveWarmupStarted = false;
+    console.warn('Archive warmup failed:', (error as Error).message);
+  });
 }
 
 function buildDeterministicFallbackSynthesis(query: string, sources: CitedSource[]) {
@@ -339,7 +757,7 @@ function buildDeterministicFallbackSynthesis(query: string, sources: CitedSource
   return {
     eventName: query,
     disasterType: type,
-    location: 'Odisha / Regional India',
+    location: 'India',
     state: 'India',
     country: 'India',
     dateRange: 'Historical Record',
@@ -364,9 +782,6 @@ function buildDeterministicFallbackSynthesis(query: string, sources: CitedSource
   };
 }
 
-/**
- * Compares 2-4 historical disaster events based on their evidence bundles.
- */
 export async function compareDisasterEvents(bundles: EvidenceBundle[]): Promise<{
   comparisonPoints: { category: string; label: string; values: { eventId: string; value: string; citations: string[] }[] }[];
   aiSynthesis: { broaderImpact: string; responseDifferences: string; crossEventLessons: string; citations: string[] };
@@ -410,13 +825,12 @@ export async function compareDisasterEvents(bundles: EvidenceBundle[]): Promise<
     },
   ];
 
-  // AI synthesis of comparison
   const prompt = `Compare the following ${bundles.length} historical disaster events based solely on their evidence:
 ${bundles
   .map(
     (b, i) =>
       `Event ${i + 1}: ${b.eventName} (${b.disasterType}, ${b.location})\n` +
-      `Impact: ${b.humanImpact}\nDamage: ${b.infrastructureDamage}\nResponse: ${b.governmentResponse}\nSources: ${b.sources.map((s) => `[${s.id}] ${s.title}`).join(', ')}`
+      `Impact: ${b.humanImpact}\nDamage: ${b.infrastructureDamage}\nResponse: ${b.governmentResponse}\nSources: ${b.sources.map((s) => `[${s.id}] ${s.title}`).join(', ')}`,
   )
   .join('\n\n')}
 
@@ -432,9 +846,9 @@ Return JSON:
 }`;
 
   let aiSynthesis = {
-    broaderImpact: `Comparative impact analysis between ${bundles.map((b) => b.eventName).join(' and ')}. Both events demonstrated substantial community disruption requiring extensive state-level intervention.`,
-    responseDifferences: `Early warning dissemination and evacuation preparedness differed based on meteorological lead time and geographical terrain.`,
-    crossEventLessons: `Key lessons include robust coastal shelter networks, underground power cabling, and decentralized emergency food stockpiles.`,
+    broaderImpact: `Comparative impact analysis between ${bundles.map((b) => b.eventName).join(' and ')}.`,
+    responseDifferences: `Early warning dissemination and evacuation preparedness differed based on lead time and terrain.`,
+    crossEventLessons: `Key lessons include robust shelter networks, redundant communications, and staged evacuation planning.`,
     citations: bundles.flatMap((b) => b.sources.slice(0, 1).map((s) => s.id)),
   };
 
@@ -443,9 +857,11 @@ Return JSON:
       prompt,
       responseMimeType: 'application/json',
       systemInstruction: 'You are an objective disaster risk comparison analyst. Reference sources like [S1], [S2].',
+      keyScope: 'past',
     });
+
     if (raw) {
-      const parsed = JSON.parse(raw);
+      const parsed = JSON.parse(stripCodeFences(raw));
       const allSources = bundles.flatMap((b) => b.sources);
       aiSynthesis = {
         broaderImpact: validateAndCleanCitations(parsed.broaderImpact || aiSynthesis.broaderImpact, allSources),
@@ -454,16 +870,13 @@ Return JSON:
         citations: allSources.slice(0, 4).map((s) => s.id),
       };
     }
-  } catch (e) {
-    console.log('Compare AI fallback used');
+  } catch (error) {
+    console.log('Groq comparison synthesis fallback:', (error as Error).message);
   }
 
   return { comparisonPoints, aiSynthesis };
 }
 
-/**
- * Historical Research AI Assistant Chat with multilingual support and citations.
- */
 export async function chatResearchAssistant(params: {
   message: string;
   history: { role: 'user' | 'assistant'; content: string }[];
@@ -485,7 +898,6 @@ export async function chatResearchAssistant(params: {
       `Sources:\n` +
       evidenceSources.map((s) => `[${s.id}] ${s.title} (${s.publisher}): ${s.summary}`).join('\n');
   } else {
-    // Dynamic search planning
     const articles = await searchGoogleNews(message, { isCurrentNews: false, maxResults: 4 });
     evidenceSources = articles.map((art, idx) => ({
       id: `S${idx + 1}`,
@@ -501,7 +913,7 @@ export async function chatResearchAssistant(params: {
 
   const langInstruction =
     targetLanguage && targetLanguage !== 'en'
-      ? `Respond fluently and naturally in the requested language code "${targetLanguage}" (e.g. Hindi, Bengali, Tamil, Telugu, Marathi, Odia, Gujarati, Punjabi, etc.) using accurate native script. Maintain all citation markers like [S1], [S2] intact.`
+      ? `Respond fluently and naturally in the requested language code "${targetLanguage}" using accurate native script. Maintain all citation markers like [S1], [S2] intact.`
       : `Respond in clear, professional English.`;
 
   const systemInstruction = `You are the Lead Historical Disaster Intelligence Research Assistant.
@@ -525,6 +937,7 @@ Provide a professional, cited research answer:`;
   let reply = await generateWithFallback({
     prompt,
     systemInstruction,
+    keyScope: 'chat',
   });
 
   if (!reply) {
@@ -542,36 +955,36 @@ Provide a professional, cited research answer:`;
   };
 }
 
-/**
- * Text-to-Speech (TTS) audio generator using Gemini TTS model or synthesized speech.
- */
-export async function generateTTSAudio(text: string, voiceName: string = 'Kore'): Promise<string | null> {
-  const ai = getAIClient();
-  if (!ai) return null;
+export async function generateTTSAudio(text: string, voiceName: string = getGroqTtsVoice()): Promise<string | null> {
+  const apiKey = getGroqKey('tts');
+  const baseUrl = getGroqBaseUrl();
+  const ttsModel = getGroqTtsModel();
+  const cleanText = text.replace(/\[S\d+\]/gi, '').replace(/[#*_`]/g, '').slice(0, 500);
 
   try {
-    const cleanText = text.replace(/\[S\d+\]/gi, '').replace(/[#*_`]/g, '').slice(0, 400);
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.1-flash-tts-preview',
-      contents: [{ parts: [{ text: cleanText }] }],
-      config: {
-        responseModalities: [Modality.AUDIO],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: voiceName || 'Kore' },
-          },
-        },
+    const response = await fetch(`${baseUrl}/audio/speech`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
       },
+      body: JSON.stringify({
+        model: ttsModel,
+        input: cleanText,
+        voice: voiceName || getGroqTtsVoice(),
+        response_format: 'mp3',
+      }),
     });
 
-    const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-    if (base64Audio) {
-      return base64Audio;
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      throw new Error(`Groq TTS failed: HTTP ${response.status} ${text}`.trim());
     }
-  } catch (err) {
-    console.log('Gemini TTS fallback:', (err as Error).message);
-  }
 
-  return null;
+    const audioBuffer = await response.arrayBuffer();
+    return toBase64(audioBuffer);
+  } catch (error) {
+    console.log('Groq TTS fallback:', (error as Error).message);
+    return null;
+  }
 }

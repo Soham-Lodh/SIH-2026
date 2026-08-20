@@ -26,7 +26,7 @@ import {
 import { getTranslation } from '../../types/language';
 
 interface LocationIntelligencePanelProps {
-  userLocation: UserLocation;
+  userLocation: UserLocation | null;
   relevanceResults: RelevanceResult[];
   selectedAlert: SachetAlert | null;
   onSelectAlert: (alert: SachetAlert) => void;
@@ -35,26 +35,6 @@ interface LocationIntelligencePanelProps {
   onOpenShareModal: (alert: SachetAlert, result: RelevanceResult) => void;
   language: string;
 }
-
-// Preset Indian locations for quick checking
-const PRESET_INDIAN_LOCATIONS: { name: string; state: string; lat: number; lng: number }[] = [
-  { name: 'Bhubaneswar', state: 'Odisha', lat: 20.2961, lng: 85.8245 },
-  { name: 'Puri', state: 'Odisha', lat: 19.8135, lng: 85.8312 },
-  { name: 'Cuttack', state: 'Odisha', lat: 20.4625, lng: 85.8828 },
-  { name: 'Balasore', state: 'Odisha', lat: 21.4934, lng: 86.9135 },
-  { name: 'Kolkata', state: 'West Bengal', lat: 22.5726, lng: 88.3639 },
-  { name: 'Digha', state: 'West Bengal', lat: 21.6266, lng: 87.5074 },
-  { name: 'Visakhapatnam', state: 'Andhra Pradesh', lat: 17.6868, lng: 83.2185 },
-  { name: 'Chennai', state: 'Tamil Nadu', lat: 13.0827, lng: 80.2707 },
-  { name: 'Ernakulam / Kochi', state: 'Kerala', lat: 9.9816, lng: 76.2999 },
-  { name: 'Wayanad', state: 'Kerala', lat: 11.6854, lng: 76.1320 },
-  { name: 'Shimla', state: 'Himachal Pradesh', lat: 31.1048, lng: 77.1734 },
-  { name: 'Dehradun', state: 'Uttarakhand', lat: 30.3165, lng: 78.0322 },
-  { name: 'Guwahati', state: 'Assam', lat: 26.1445, lng: 91.7362 },
-  { name: 'Patna', state: 'Bihar', lat: 25.5941, lng: 85.1376 },
-  { name: 'Mumbai', state: 'Maharashtra', lat: 19.0760, lng: 72.8777 },
-  { name: 'Bikaner', state: 'Rajasthan', lat: 28.0229, lng: 73.3119 },
-];
 
 export const LocationIntelligencePanel: React.FC<LocationIntelligencePanelProps> = ({
   userLocation,
@@ -67,7 +47,9 @@ export const LocationIntelligencePanel: React.FC<LocationIntelligencePanelProps>
   language,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
-  const [showPresets, setShowPresets] = useState(false);
+  const [isResolvingLocation, setIsResolvingLocation] = useState(false);
+  const [lookupError, setLookupError] = useState<string | null>(null);
+  const [resolvedPlaces, setResolvedPlaces] = useState<Array<{ name: string; lat: number; lng: number; state?: string; district?: string; country?: string }>>([]);
   const [activeTab, setActiveTab] = useState<'measures' | 'helplines' | 'dos_donts'>('measures');
   const t = getTranslation(language);
 
@@ -88,41 +70,59 @@ export const LocationIntelligencePanel: React.FC<LocationIntelligencePanelProps>
 
   const guidance = activeRelevance?.evacuationGuidance;
 
-  const handleLocationSelect = (loc: typeof PRESET_INDIAN_LOCATIONS[0]) => {
-    onCheckCustomLocation({
-      lat: loc.lat,
-      lng: loc.lng,
-      cityName: loc.name,
-      state: loc.state,
-      timestamp: Date.now(),
-      isCustomLookup: true,
-    });
-    setSearchQuery('');
-    setShowPresets(false);
-  };
-
-  const handleManualSearch = (e: React.FormEvent) => {
+  const handleManualSearch = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!searchQuery.trim()) return;
+    const q = searchQuery.trim();
+    if (!q) return;
 
-    const matched = PRESET_INDIAN_LOCATIONS.find(
-      (l) =>
-        l.name.toLowerCase().includes(searchQuery.toLowerCase().trim()) ||
-        l.state.toLowerCase().includes(searchQuery.toLowerCase().trim())
-    );
+    setIsResolvingLocation(true);
+    setLookupError(null);
+    setResolvedPlaces([]);
 
-    if (matched) {
-      handleLocationSelect(matched);
-    } else {
+    try {
+      const res = await fetch(`/api/geocode?q=${encodeURIComponent(q)}`);
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data?.error || 'Unable to resolve location');
+      }
+
+      const places = Array.isArray(data.places) ? data.places : [];
+      if (!places.length) {
+        setLookupError('No live location match found.');
+        return;
+      }
+
+      setResolvedPlaces(places.slice(0, 5));
+      const [best] = places;
       onCheckCustomLocation({
-        lat: 20.2961,
-        lng: 85.8245,
-        cityName: searchQuery,
+        lat: best.lat,
+        lng: best.lng,
+        cityName: best.name,
+        state: best.state || best.district || best.country,
+        district: best.district,
         timestamp: Date.now(),
         isCustomLookup: true,
       });
-      setShowPresets(false);
+    } catch (error) {
+      setLookupError((error as Error).message || 'Location lookup failed');
+    } finally {
+      setIsResolvingLocation(false);
     }
+  };
+
+  const handleSelectResolvedPlace = (place: { name: string; lat: number; lng: number; state?: string; district?: string; country?: string }) => {
+    onCheckCustomLocation({
+      lat: place.lat,
+      lng: place.lng,
+      cityName: place.name,
+      state: place.state || place.district || place.country,
+      district: place.district,
+      timestamp: Date.now(),
+      isCustomLookup: true,
+    });
+    setSearchQuery(place.name);
+    setResolvedPlaces([]);
   };
 
   return (
@@ -136,22 +136,24 @@ export const LocationIntelligencePanel: React.FC<LocationIntelligencePanelProps>
             </div>
             <div>
               <h3 className="font-bold text-sm text-slate-900 flex items-center gap-1.5">
-                <span>{userLocation.isCustomLookup ? 'Queried Location' : 'Your Current Location'}</span>
-                {userLocation.isCustomLookup && (
+                <span>{userLocation?.isCustomLookup ? 'Queried Location' : userLocation ? 'Your Current Location' : 'No Location Selected'}</span>
+                {userLocation?.isCustomLookup && (
                   <span className="text-[10px] bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-semibold border border-indigo-100">
                     Custom Pin
                   </span>
                 )}
               </h3>
               <p className="text-xs text-slate-500 font-medium">
-                {userLocation.cityName
-                  ? `${userLocation.cityName}, ${userLocation.state || 'India'}`
-                  : `${userLocation.lat.toFixed(4)}° N, ${userLocation.lng.toFixed(4)}° E`}
+                {userLocation
+                  ? userLocation.cityName
+                    ? `${userLocation.cityName}, ${userLocation.state || 'India'}`
+                    : `${userLocation.lat.toFixed(4)}° N, ${userLocation.lng.toFixed(4)}° E`
+                  : 'Search a city, district, or village to start live geospatial monitoring.'}
               </p>
             </div>
           </div>
 
-          {userLocation.isCustomLookup && (
+          {userLocation?.isCustomLookup && (
             <button
               type="button"
               onClick={onResetToGPS}
@@ -170,42 +172,40 @@ export const LocationIntelligencePanel: React.FC<LocationIntelligencePanelProps>
               <input
                 type="text"
                 value={searchQuery}
-                onFocus={() => setShowPresets(true)}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search city/district (e.g. Bhubaneswar, Puri, Kolkata, Shimla)..."
+                placeholder="Search city, district, village, or landmark..."
                 className="w-full pl-9 pr-3 py-2 text-xs rounded-xl bg-slate-50 border border-slate-200 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all"
               />
             </div>
             <button
               type="submit"
-              className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-xs font-semibold text-white transition-colors"
+              disabled={isResolvingLocation}
+              className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-60 text-xs font-semibold text-white transition-colors"
             >
-              Query
+              {isResolvingLocation ? 'Locating...' : 'Query'}
             </button>
           </form>
 
-          {/* Location presets dropdown */}
-          {showPresets && (
-            <div className="absolute top-11 left-0 right-0 z-30 bg-white border border-slate-200 rounded-2xl p-2 shadow-xl space-y-0.5 max-h-52 overflow-y-auto">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-3 py-1.5 flex justify-between">
-                <span>Select Target Indian Region</span>
-                <button
-                  type="button"
-                  onClick={() => setShowPresets(false)}
-                  className="text-slate-400 hover:text-slate-600"
-                >
-                  Close
-                </button>
+          {lookupError && (
+            <div className="mt-2 text-[11px] text-rose-700 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2">
+              {lookupError}
+            </div>
+          )}
+
+          {resolvedPlaces.length > 1 && (
+            <div className="mt-2 rounded-2xl border border-slate-200 bg-slate-50 p-2 space-y-1.5">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-1">
+                Select a live geocoded match
               </div>
-              {PRESET_INDIAN_LOCATIONS.map((loc) => (
+              {resolvedPlaces.map((place) => (
                 <button
-                  key={loc.name}
+                  key={`${place.name}-${place.lat}-${place.lng}`}
                   type="button"
-                  onClick={() => handleLocationSelect(loc)}
-                  className="w-full text-left px-3 py-2 rounded-xl text-xs hover:bg-slate-50 flex justify-between items-center text-slate-700 hover:text-slate-900 transition-colors"
+                  onClick={() => handleSelectResolvedPlace(place)}
+                  className="w-full text-left px-3 py-2 rounded-xl text-xs hover:bg-white border border-transparent hover:border-slate-200 flex justify-between gap-3 transition-colors"
                 >
-                  <span className="font-semibold">{loc.name}</span>
-                  <span className="text-[11px] text-slate-500">{loc.state}</span>
+                  <span className="font-semibold text-slate-800">{place.name}</span>
+                  <span className="text-[11px] text-slate-500">{place.state || place.country || 'India'}</span>
                 </button>
               ))}
             </div>
@@ -214,7 +214,7 @@ export const LocationIntelligencePanel: React.FC<LocationIntelligencePanelProps>
       </div>
 
       {/* Main Intelligence Block */}
-      {activeAlert && activeRelevance && activeRelevance.status !== 'NOT_RELEVANT' ? (
+      {userLocation && activeAlert && activeRelevance && activeRelevance.status !== 'NOT_RELEVANT' ? (
         <div className="space-y-4">
           {/* SOS Real-time Threat & Evacuation Banner */}
           <div
@@ -470,9 +470,13 @@ export const LocationIntelligencePanel: React.FC<LocationIntelligencePanelProps>
             <CheckCircle2 className="w-6 h-6" />
           </div>
           <div>
-            <h4 className="font-bold text-sm text-slate-900">{t.noAlertsNearby}</h4>
+            <h4 className="font-bold text-sm text-slate-900">
+              {userLocation ? t.noAlertsNearby : 'Select a location to evaluate nearby threats'}
+            </h4>
             <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto leading-relaxed">
-              No active extreme hazard warnings directly intersect your selected coordinates ({userLocation.cityName || 'Current Point'}).
+              {userLocation
+                ? `No active extreme hazard warnings directly intersect your selected coordinates (${userLocation.cityName || 'Current Point'}).`
+                : 'Use GPS or a live geocoded search to activate the evacuation guidance and nearby hazard check.'}
             </p>
           </div>
 

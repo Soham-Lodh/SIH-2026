@@ -30,21 +30,69 @@ export const PresentWorkspace: React.FC<PresentWorkspaceProps> = ({
   const [selectedAlert, setSelectedAlert] = useState<SachetAlert | null>(null);
   const [mobileTab, setMobileTab] = useState<'india' | 'nearme'>('india');
 
-  // User location: Default to Bhubaneswar, Odisha (active coastal test location) or live GPS
-  const [userLocation, setUserLocation] = useState<UserLocation>({
-    lat: 20.2961,
-    lng: 85.8245,
-    cityName: 'Bhubaneswar',
-    state: 'Odisha',
-    timestamp: Date.now(),
-    isCustomLookup: false,
-  });
+  const [userLocation, setUserLocation] = useState<UserLocation | null>(null);
 
   const [relevanceResults, setRelevanceResults] = useState<RelevanceResult[]>([]);
   const [shareAlert, setShareAlert] = useState<SachetAlert | null>(null);
   const [shareRelevance, setShareRelevance] = useState<RelevanceResult | null>(null);
 
   const t = getTranslation(language);
+
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setUserLocation({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          accuracyMeters: pos.coords.accuracy,
+          cityName: 'Current GPS Point',
+          timestamp: Date.now(),
+          isCustomLookup: false,
+        });
+      },
+      (err) => {
+        console.log('Geolocation unavailable or denied:', err.message);
+      },
+      { timeout: 5000 }
+    );
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('WebSocket' in window)) return undefined;
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const ws = new WebSocket(`${protocol}//${window.location.host}/api/alerts/ws`);
+
+    ws.onopen = () => {
+      onFeedStatusChange?.('LIVE_FETCH', new Date().toISOString());
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        if (payload?.type === 'alerts' && payload.snapshot) {
+          setAlerts(payload.snapshot.alerts || []);
+          if (payload.snapshot.etag) setEtag(payload.snapshot.etag);
+          onFeedStatusChange?.(
+            payload.snapshot.cacheStatus === 'FALLBACK_SNAPSHOT' ? 'FALLBACK_SNAPSHOT' : 'LIVE_FETCH',
+            payload.snapshot.lastUpdated || new Date().toISOString()
+          );
+          setIsLoading(false);
+        }
+      } catch (err) {
+        console.error('Alert socket message parse error:', err);
+      }
+    };
+
+    ws.onerror = () => {
+      // Keep the last known feed state; transient socket noise should not surface as a hard error.
+      console.warn('Alert socket error event received.');
+    };
+
+    return () => ws.close();
+  }, [onFeedStatusChange]);
 
   // Fetch SACHET alerts
   const fetchAlerts = async () => {
@@ -75,33 +123,15 @@ export const PresentWorkspace: React.FC<PresentWorkspaceProps> = ({
         }
       }
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return;
+      }
       console.error('Failed to fetch SACHET alerts:', err);
       if (onFeedStatusChange) onFeedStatusChange('ERROR', new Date().toISOString());
     } finally {
       setIsLoading(false);
     }
   };
-
-  // Try retrieving user's real browser GPS coordinates on mount
-  useEffect(() => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          setUserLocation({
-            lat: pos.coords.latitude,
-            lng: pos.coords.longitude,
-            cityName: 'Current GPS Point',
-            timestamp: Date.now(),
-            isCustomLookup: false,
-          });
-        },
-        (err) => {
-          console.log('Using default Indian location point (Odisha). Geolocation notice:', err.message);
-        },
-        { timeout: 5000 }
-      );
-    }
-  }, []);
 
   // Initial fetch and 30-sec polling
   useEffect(() => {
@@ -112,9 +142,11 @@ export const PresentWorkspace: React.FC<PresentWorkspaceProps> = ({
 
   // Run 5-Case Geospatial Relevance Engine whenever alerts or user location updates
   useEffect(() => {
-    if (alerts.length > 0) {
+    if (alerts.length > 0 && userLocation) {
       const results = evaluateAllAlertsRelevance(alerts, userLocation);
       setRelevanceResults(results);
+    } else {
+      setRelevanceResults([]);
     }
   }, [alerts, userLocation]);
 
@@ -123,9 +155,8 @@ export const PresentWorkspace: React.FC<PresentWorkspaceProps> = ({
     .filter((r) => r.status !== 'NOT_RELEVANT')
     .map((r) => r.alert);
 
-  const topRelevance = relevanceResults.find(
-    (r) => r.status === 'CRITICAL' || r.status === 'HIGH_PRIORITY'
-  ) || null;
+  const topRelevance =
+    relevanceResults.find((r) => r.isInsideBoundary && r.status !== 'NOT_RELEVANT') || null;
 
   const handleSelectAlert = (alert: SachetAlert) => {
     setSelectedAlert(alert);
@@ -142,20 +173,14 @@ export const PresentWorkspace: React.FC<PresentWorkspaceProps> = ({
           setUserLocation({
             lat: pos.coords.latitude,
             lng: pos.coords.longitude,
+            accuracyMeters: pos.coords.accuracy,
             cityName: 'Current GPS Point',
             timestamp: Date.now(),
             isCustomLookup: false,
           });
         },
         () => {
-          setUserLocation({
-            lat: 20.2961,
-            lng: 85.8245,
-            cityName: 'Bhubaneswar',
-            state: 'Odisha',
-            timestamp: Date.now(),
-            isCustomLookup: false,
-          });
+          setUserLocation(null);
         }
       );
     }
@@ -209,13 +234,24 @@ export const PresentWorkspace: React.FC<PresentWorkspaceProps> = ({
         {isLoading ? (
           <IndiaMapSkeleton />
         ) : (
-          <IndiaLiveMap
-            alerts={alerts}
-            selectedAlertId={selectedAlert?.id || null}
-            onSelectAlert={handleSelectAlert}
-            userCoordinates={[userLocation.lat, userLocation.lng]}
-            language={language}
-          />
+          <div className="space-y-3">
+            <IndiaLiveMap
+              alerts={alerts}
+              selectedAlertId={selectedAlert?.id || null}
+              onSelectAlert={handleSelectAlert}
+              userCoordinates={userLocation ? [userLocation.lat, userLocation.lng] : undefined}
+              language={language}
+            />
+
+            {!userLocation && (
+              <div className="rounded-2xl bg-white border border-dashed border-slate-300 px-4 py-3 shadow-sm flex items-center gap-3">
+                <MapPin className="w-5 h-5 text-indigo-600 shrink-0" />
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Location access is optional. You can still browse the India map, filter hazards, and open alert details without GPS. Proximity guidance activates after you share a location.
+                </p>
+              </div>
+            )}
+          </div>
         )}
       </div>
 
@@ -245,8 +281,9 @@ export const PresentWorkspace: React.FC<PresentWorkspaceProps> = ({
             <UserMapSkeleton />
           ) : (
             <UserLocationMap
-              userLocation={userLocation}
+              alerts={alerts}
               nearbyAlerts={nearbyAlerts}
+              userLocation={userLocation}
               selectedAlertId={selectedAlert?.id || null}
               onSelectAlert={handleSelectAlert}
             />

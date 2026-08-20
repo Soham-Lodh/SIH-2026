@@ -29,6 +29,220 @@ interface IndiaLiveMapProps {
   language: string;
 }
 
+const INDIA_BOUNDS = {
+  minLat: 6.0,
+  maxLat: 38.8,
+  minLng: 67.5,
+  maxLng: 98.8,
+};
+
+const STATE_CENTROIDS: Record<string, [number, number]> = {
+  'andaman and nicobar islands': [11.7401, 92.6586],
+  'andhra pradesh': [15.9129, 79.74],
+  'arunachal pradesh': [28.218, 94.7278],
+  assam: [26.2006, 92.9376],
+  bihar: [25.0961, 85.3131],
+  chhattisgarh: [21.2787, 81.8661],
+  goa: [15.2993, 74.124],
+  gujarat: [22.2587, 71.1924],
+  haryana: [29.0588, 76.0856],
+  'himachal pradesh': [31.1048, 77.1734],
+  jharkhand: [23.6102, 85.2799],
+  karnataka: [15.3173, 75.7139],
+  kerala: [10.8505, 76.2711],
+  ladakh: [34.1526, 77.577],
+  'madhya pradesh': [22.9734, 78.6569],
+  maharashtra: [19.7515, 75.7139],
+  manipur: [24.6637, 93.9063],
+  meghalaya: [25.467, 91.3662],
+  mizoram: [23.1645, 92.9376],
+  nagaland: [26.1584, 94.5624],
+  odisha: [20.9517, 85.0985],
+  punjab: [31.1471, 75.3412],
+  rajasthan: [27.0238, 74.2179],
+  sikkim: [27.533, 88.5122],
+  'tamil nadu': [11.1271, 78.6569],
+  telangana: [18.1124, 79.0193],
+  tripura: [23.9408, 91.9882],
+  uttarakhand: [30.0668, 79.0193],
+  'uttar pradesh': [26.8467, 80.9462],
+  'west bengal': [22.9868, 87.855],
+  delhi: [28.6139, 77.209],
+  'jammu and kashmir': [33.7782, 76.5762],
+  'dadra and nagar haveli and daman and diu': [20.3974, 72.8328],
+  puducherry: [11.9416, 79.8083],
+};
+
+function clampToIndiaBounds([lat, lng]: [number, number]): [number, number] {
+  return [
+    Math.min(Math.max(lat, INDIA_BOUNDS.minLat), INDIA_BOUNDS.maxLat),
+    Math.min(Math.max(lng, INDIA_BOUNDS.minLng), INDIA_BOUNDS.maxLng),
+  ];
+}
+
+function hashString(input: string): number {
+  let hash = 0;
+  for (let i = 0; i < input.length; i++) {
+    hash = (hash << 5) - hash + input.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+function applyStableJitter(base: [number, number], seed: string, spread = 0.42): [number, number] {
+  const hash = hashString(seed || 'alert');
+  const angle = (hash % 360) * (Math.PI / 180);
+  const radius = ((hash % 1000) / 1000) * spread;
+  return clampToIndiaBounds([
+    base[0] + Math.sin(angle) * radius,
+    base[1] + Math.cos(angle) * radius,
+  ]);
+}
+
+function hashFallbackPoint(seed: string): [number, number] {
+  const hash = hashString(seed || 'alert');
+  const latRange = INDIA_BOUNDS.maxLat - INDIA_BOUNDS.minLat;
+  const lngRange = INDIA_BOUNDS.maxLng - INDIA_BOUNDS.minLng;
+  const lat = INDIA_BOUNDS.minLat + ((hash % 10000) / 10000) * latRange;
+  const lng = INDIA_BOUNDS.minLng + (((Math.floor(hash / 10000) % 10000)) / 10000) * lngRange;
+  return clampToIndiaBounds([lat, lng]);
+}
+
+function deriveFallbackAlertPoint(alert: SachetAlert): [number, number] | null {
+  const text = [
+    alert.state,
+    alert.district,
+    alert.areaDesc,
+    alert.event,
+    alert.headline,
+    alert.description,
+    alert.category,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  for (const [needle, centroid] of Object.entries(STATE_CENTROIDS)) {
+    if (text.includes(needle)) return centroid;
+  }
+
+  if (text.includes('bhubaneswar') || text.includes('puri') || text.includes('cuttack')) return STATE_CENTROIDS.odisha;
+  if (text.includes('guwahati') || text.includes('kamrup') || text.includes('dibrugarh')) return STATE_CENTROIDS.assam;
+  if (text.includes('shimla') || text.includes('kullu') || text.includes('manali')) return STATE_CENTROIDS['himachal pradesh'];
+  if (text.includes('srinagar') || text.includes('jammu')) return STATE_CENTROIDS['jammu and kashmir'];
+  if (text.includes('mumbai') || text.includes('raigad') || text.includes('konkan')) return STATE_CENTROIDS.maharashtra;
+  if (text.includes('kozhikode') || text.includes('wayanad') || text.includes('thiruvananthapuram')) return STATE_CENTROIDS.kerala;
+  if (text.includes('ahmedabad') || text.includes('surat') || text.includes('kutch')) return STATE_CENTROIDS.gujarat;
+  if (text.includes('kolkata') || text.includes('sundarbans')) return STATE_CENTROIDS['west bengal'];
+  if (text.includes('chennai') || text.includes('madurai') || text.includes('tirunelveli')) return STATE_CENTROIDS['tamil nadu'];
+  if (text.includes('jaipur') || text.includes('bikaner') || text.includes('jaisalmer')) return STATE_CENTROIDS.rajasthan;
+  if (text.includes('delhi') || text.includes('ncr') || text.includes('gurugram')) return STATE_CENTROIDS.delhi;
+
+  const districtHints: Array<[string, [number, number]]> = [
+    ['arvalli', STATE_CENTROIDS.gujarat],
+    ['chhotaudepur', STATE_CENTROIDS.gujarat],
+    ['chhota udaipur', STATE_CENTROIDS.gujarat],
+    ['dahod', STATE_CENTROIDS.gujarat],
+    ['mahisagar', STATE_CENTROIDS.gujarat],
+    ['narmada', STATE_CENTROIDS.gujarat],
+    ['panch mahals', STATE_CENTROIDS.gujarat],
+    ['panchmahal', STATE_CENTROIDS.gujarat],
+    ['sabarkantha', STATE_CENTROIDS.gujarat],
+    ['sabar kantha', STATE_CENTROIDS.gujarat],
+    ['banaskantha', STATE_CENTROIDS.gujarat],
+    ['balrampur', STATE_CENTROIDS['chhattisgarh']],
+    ['bastar', STATE_CENTROIDS['chhattisgarh']],
+    ['bijapur', STATE_CENTROIDS['chhattisgarh']],
+    ['dantewada', STATE_CENTROIDS['chhattisgarh']],
+    ['koriya', STATE_CENTROIDS['chhattisgarh']],
+    ['manendragarh', STATE_CENTROIDS['chhattisgarh']],
+    ['sukma', STATE_CENTROIDS['chhattisgarh']],
+    ['surajpur', STATE_CENTROIDS['chhattisgarh']],
+    ['chengalpattu', STATE_CENTROIDS['tamil nadu']],
+    ['cuddalore', STATE_CENTROIDS['tamil nadu']],
+    ['kallakurichi', STATE_CENTROIDS['tamil nadu']],
+    ['kancheepuram', STATE_CENTROIDS['tamil nadu']],
+    ['pudukkottai', STATE_CENTROIDS['tamil nadu']],
+    ['sivaganga', STATE_CENTROIDS['tamil nadu']],
+    ['thanjavur', STATE_CENTROIDS['tamil nadu']],
+    ['thiruvarur', STATE_CENTROIDS['tamil nadu']],
+    ['viluppuram', STATE_CENTROIDS['tamil nadu']],
+    ['ariyalur', STATE_CENTROIDS['tamil nadu']],
+    ['karur', STATE_CENTROIDS['tamil nadu']],
+    ['alipurduar', STATE_CENTROIDS['west bengal']],
+    ['jalpaiguri', STATE_CENTROIDS['west bengal']],
+    ['north dinajpur', STATE_CENTROIDS['west bengal']],
+    ['south dinajpur', STATE_CENTROIDS['west bengal']],
+    ['uttar dinajpur', STATE_CENTROIDS['west bengal']],
+    ['dakshin dinajpur', STATE_CENTROIDS['west bengal']],
+    ['dehradun', STATE_CENTROIDS.uttarakhand],
+    ['tehri', STATE_CENTROIDS.uttarakhand],
+    ['uttarkashi', STATE_CENTROIDS.uttarakhand],
+    ['chamoli', STATE_CENTROIDS.uttarakhand],
+    ['rudraprayag', STATE_CENTROIDS.uttarakhand],
+    ['pithoragarh', STATE_CENTROIDS.uttarakhand],
+    ['east garo hills', STATE_CENTROIDS.meghalaya],
+    ['west garo hills', STATE_CENTROIDS.meghalaya],
+    ['east khasi hills', STATE_CENTROIDS.meghalaya],
+    ['west khasi hills', STATE_CENTROIDS.meghalaya],
+    ['west jaintia hills', STATE_CENTROIDS.meghalaya],
+    ['south west khasi hills', STATE_CENTROIDS.meghalaya],
+    ['ri bhoi', STATE_CENTROIDS.meghalaya],
+    ['bahraich', STATE_CENTROIDS['uttar pradesh']],
+    ['shravasti', STATE_CENTROIDS['uttar pradesh']],
+    ['saharanpur', STATE_CENTROIDS['uttar pradesh']],
+    ['sonbhadra', STATE_CENTROIDS['uttar pradesh']],
+    ['assam', STATE_CENTROIDS.assam],
+    ['kamrup', STATE_CENTROIDS.assam],
+    ['sonitpur', STATE_CENTROIDS.assam],
+    ['dibrugarh', STATE_CENTROIDS.assam],
+    ['goalpara', STATE_CENTROIDS.assam],
+    ['barpeta', STATE_CENTROIDS.assam],
+    ['maharashtra', STATE_CENTROIDS.maharashtra],
+    ['raigad', STATE_CENTROIDS.maharashtra],
+    ['ratnagiri', STATE_CENTROIDS.maharashtra],
+    ['sindhudurg', STATE_CENTROIDS.maharashtra],
+    ['kerala', STATE_CENTROIDS.kerala],
+    ['wayanad', STATE_CENTROIDS.kerala],
+    ['idukki', STATE_CENTROIDS.kerala],
+    ['palakkad', STATE_CENTROIDS.kerala],
+    ['odisha', STATE_CENTROIDS.odisha],
+    ['bhadrak', STATE_CENTROIDS.odisha],
+    ['balasore', STATE_CENTROIDS.odisha],
+    ['khordha', STATE_CENTROIDS.odisha],
+    ['kalahandi', STATE_CENTROIDS.odisha],
+    ['koraput', STATE_CENTROIDS.odisha],
+    ['jagatsinghpur', STATE_CENTROIDS.odisha],
+    ['kendrapara', STATE_CENTROIDS.odisha],
+    ['bihar', STATE_CENTROIDS.bihar],
+    ['muzaffarpur', STATE_CENTROIDS.bihar],
+    ['sitamarhi', STATE_CENTROIDS.bihar],
+    ['madhubani', STATE_CENTROIDS.bihar],
+    ['patna', STATE_CENTROIDS.bihar],
+    ['maharashtra', STATE_CENTROIDS.maharashtra],
+  ];
+
+  for (const [needle, centroid] of districtHints) {
+    if (text.includes(needle)) return centroid;
+  }
+
+  return null;
+}
+
+export function resolveAlertMapPoint(alert: SachetAlert, index = 0): [number, number] | null {
+  const base =
+    alert.centroid ||
+    (alert.polygon && alert.polygon.coordinates.length > 0 ? alert.polygon.coordinates[0] : null) ||
+    (alert.circle ? alert.circle.center : null) ||
+    deriveFallbackAlertPoint(alert);
+
+  if (!base) {
+    return applyStableJitter(hashFallbackPoint(`${alert.id}:${alert.state || ''}:${alert.district || ''}:${alert.areaDesc || alert.event}`), alert.id, 0.18);
+  }
+
+  return applyStableJitter(base, `${alert.id}:${index}:${alert.state || ''}:${alert.district || ''}`);
+}
+
 // Icon mappings for categories
 export function getCategoryIconSvg(category: DisasterCategory | string, severity?: string): string {
   let color = '#ef4444'; // Red default
@@ -72,6 +286,7 @@ export const IndiaLiveMap: React.FC<IndiaLiveMapProps> = ({
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const layerGroupRef = useRef<L.LayerGroup | null>(null);
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const [mapError, setMapError] = useState<boolean>(false);
   const [activeCategoryFilter, setActiveCategoryFilter] = useState<string | null>(null);
 
@@ -108,6 +323,19 @@ export const IndiaLiveMap: React.FC<IndiaLiveMapProps> = ({
         const layerGroup = L.layerGroup().addTo(map);
         layerGroupRef.current = layerGroup;
         mapInstanceRef.current = map;
+
+        window.setTimeout(() => {
+          map.invalidateSize();
+        }, 0);
+      }
+
+      if (mapContainerRef.current && !resizeObserverRef.current) {
+        resizeObserverRef.current = new ResizeObserver(() => {
+          window.requestAnimationFrame(() => {
+            mapInstanceRef.current?.invalidateSize();
+          });
+        });
+        resizeObserverRef.current.observe(mapContainerRef.current);
       }
     } catch (e) {
       console.error('Leaflet initialization error:', e);
@@ -115,6 +343,8 @@ export const IndiaLiveMap: React.FC<IndiaLiveMapProps> = ({
     }
 
     return () => {
+      resizeObserverRef.current?.disconnect();
+      resizeObserverRef.current = null;
       if (mapInstanceRef.current) {
         mapInstanceRef.current.remove();
         mapInstanceRef.current = null;
@@ -182,16 +412,13 @@ export const IndiaLiveMap: React.FC<IndiaLiveMapProps> = ({
         circle.addTo(layerGroup);
       }
 
-      // 3. Place Hazard Marker at Centroid
-      const markerPos: [number, number] | null =
-        alert.centroid ||
-        (alert.polygon && alert.polygon.coordinates.length > 0 ? alert.polygon.coordinates[0] : null) ||
-        (alert.circle ? alert.circle.center : null);
+      // 3. Place Hazard Marker using centroid, geometry, or a stable regional fallback.
+      const markerPos = resolveAlertMapPoint(alert, filteredAlerts.indexOf(alert));
 
       if (markerPos) {
         const iconHtml = `
           <div class="relative group cursor-pointer flex flex-col items-center">
-            <div class="w-10 h-10 rounded-2xl bg-white border border-slate-200 shadow-md flex items-center justify-center ${
+            <div class="w-8 h-8 rounded-2xl bg-white border border-slate-200 shadow-md flex items-center justify-center ${
               isSelected
                 ? 'ring-4 ring-indigo-300 ring-offset-2'
                 : isExtreme
@@ -200,7 +427,7 @@ export const IndiaLiveMap: React.FC<IndiaLiveMapProps> = ({
             } transition-transform hover:scale-110">
               ${getCategoryIconSvg(alert.category, alert.severity)}
             </div>
-            <div class="mt-1 px-2.5 py-0.5 rounded-full bg-slate-900 text-[10px] font-bold text-white tracking-tight whitespace-nowrap shadow-sm">
+            <div class="mt-1 px-2 py-0.5 rounded-full bg-slate-900 text-[9px] font-bold text-white tracking-tight whitespace-nowrap shadow-sm">
               ${alert.category}
             </div>
           </div>
@@ -209,8 +436,8 @@ export const IndiaLiveMap: React.FC<IndiaLiveMapProps> = ({
         const customIcon = L.divIcon({
           html: iconHtml,
           className: 'custom-disaster-marker',
-          iconSize: [40, 50],
-          iconAnchor: [20, 25],
+          iconSize: [34, 42],
+          iconAnchor: [17, 21],
         });
 
         const marker = L.marker(markerPos, { icon: customIcon });
@@ -226,8 +453,8 @@ export const IndiaLiveMap: React.FC<IndiaLiveMapProps> = ({
     if (userCoordinates) {
       const userIconHtml = `
         <div class="relative flex items-center justify-center">
-          <div class="w-5 h-5 rounded-full bg-indigo-600 ring-4 ring-indigo-200 shadow-lg animate-pulse"></div>
-          <div class="absolute -top-6 px-2.5 py-0.5 rounded-full bg-indigo-600 text-white font-bold text-[10px] shadow whitespace-nowrap">
+          <div class="w-4 h-4 rounded-full bg-indigo-600 ring-4 ring-indigo-200 shadow-lg animate-pulse"></div>
+          <div class="absolute -top-6 px-2 py-0.5 rounded-full bg-indigo-600 text-white font-bold text-[9px] shadow whitespace-nowrap">
             Your Location
           </div>
         </div>
@@ -235,10 +462,30 @@ export const IndiaLiveMap: React.FC<IndiaLiveMapProps> = ({
       const userIcon = L.divIcon({
         html: userIconHtml,
         className: 'custom-user-marker',
-        iconSize: [20, 20],
-        iconAnchor: [10, 10],
+        iconSize: [18, 18],
+        iconAnchor: [9, 9],
       });
       L.marker(userCoordinates, { icon: userIcon, zIndexOffset: 1000 }).addTo(layerGroup);
+    }
+
+    const fitPositions = filteredAlerts
+      .map((alert, index) => resolveAlertMapPoint(alert, index))
+      .filter(Boolean) as [number, number][];
+
+    if (userCoordinates) {
+      fitPositions.push(userCoordinates);
+    }
+
+    const selectedAlert = selectedAlertId ? filteredAlerts.find((item) => item.id === selectedAlertId) : null;
+    const selectedPosition = selectedAlert ? resolveAlertMapPoint(selectedAlert, filteredAlerts.indexOf(selectedAlert)) : null;
+
+    if (selectedPosition) {
+      map.setView(selectedPosition, Math.min(Math.max(map.getZoom(), 7), 9), { animate: false });
+    } else if (fitPositions.length > 0) {
+      const bounds = L.latLngBounds(fitPositions.map((pos) => L.latLng(pos[0], pos[1])));
+      if (bounds.isValid()) {
+        map.fitBounds(bounds.pad(0.12), { padding: [28, 28], maxZoom: 9, animate: false });
+      }
     }
   }, [alerts, selectedAlertId, activeCategoryFilter, userCoordinates, onSelectAlert]);
 

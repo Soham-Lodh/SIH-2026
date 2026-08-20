@@ -42,7 +42,7 @@ export const EventDetailView: React.FC<EventDetailViewProps> = ({
   const t = getTranslation(language);
 
   const handleCopySummary = async () => {
-    const text = `📌 ${bundle.eventName} (${bundle.disasterType})\nLocation: ${bundle.location}, ${bundle.state}\nPeriod: ${bundle.dateRange}\n\nSUMMARY:\n${bundle.whatHappened}\n\nHUMAN IMPACT:\n${bundle.humanImpact}\n\nDAMAGE:\n${bundle.infrastructureDamage}\n\nGOVERNMENT RESPONSE:\n${bundle.governmentResponse}\n\nSOURCES:\n${bundle.sources.map((s) => `[${s.id}] ${s.title} (${s.publisher})`).join('\n')}\n\nSynthesized by Disaster Intelligence Platform India`;
+    const text = `${bundle.eventName} (${bundle.disasterType})\nLocation: ${bundle.location}, ${bundle.state}\nPeriod: ${bundle.dateRange}\n\nSUMMARY:\n${bundle.whatHappened}\n\nHUMAN IMPACT:\n${bundle.humanImpact}\n\nDAMAGE:\n${bundle.infrastructureDamage}\n\nGOVERNMENT RESPONSE:\n${bundle.governmentResponse}\n\nSOURCES:\n${bundle.sources.map((s) => `[${s.id}] ${s.title} (${s.publisher})`).join('\n')}\n\nSynthesized by Disaster Intelligence Platform India`;
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
@@ -308,16 +308,10 @@ export const EventDetailView: React.FC<EventDetailViewProps> = ({
               <FileCheck className="w-4 h-4 text-emerald-600" />
               <span>Retrieved Sources & Attributions ({bundle.sources.length})</span>
             </h3>
-            <a
-              href={`https://news.google.com/search?q=${encodeURIComponent(bundle.eventName + ' India disaster history')}&hl=en-IN&gl=IN&ceid=IN:en`}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="text-xs px-3 py-1 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold border border-blue-200 flex items-center gap-1.5 transition-colors"
-            >
-              <ExternalLink className="w-3 h-3" />
-              <span>Search News Archive</span>
-            </a>
           </div>
+          <p className="text-[11px] text-slate-500 leading-relaxed">
+            Citation markers such as [S1] and [S2] refer to the source entries below. Each entry links directly to the original article.
+          </p>
           <div className="divide-y divide-slate-100">
             {bundle.sources.map((source) => (
               <div key={source.id} id={`source-${source.id}`} className="py-3 space-y-1.5">

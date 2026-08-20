@@ -14,7 +14,7 @@ export const AudioRecorderButton: React.FC<AudioRecorderButtonProps> = ({
   language = 'en',
   className = '',
   buttonText,
-  tooltip = 'Click to record and transcribe speech with Gemini AI',
+  tooltip = 'Click to record and transcribe speech with Groq AI',
 }) => {
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);

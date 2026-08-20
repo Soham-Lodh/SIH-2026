@@ -19,6 +19,7 @@ import {
 import { INDIAN_LANGUAGES, getTranslation } from '../../types/language';
 import { ChatSkeleton } from '../common/Skeletons';
 import { AudioRecorderButton } from '../common/AudioRecorderButton';
+import ReactMarkdown from 'react-markdown';
 
 interface AIAssistantDrawerProps {
   isOpen: boolean;
@@ -61,6 +62,38 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const t = getTranslation(language);
   const activeLangObj = INDIAN_LANGUAGES.find((l) => l.code === language) || INDIAN_LANGUAGES[0];
+
+  const markdownComponents = {
+    h1: ({ children }: any) => <h1 className="text-base font-bold text-slate-900 mt-2">{children}</h1>,
+    h2: ({ children }: any) => <h2 className="text-sm font-bold text-slate-900 mt-2">{children}</h2>,
+    h3: ({ children }: any) => <h3 className="text-sm font-semibold text-slate-900 mt-1.5">{children}</h3>,
+    p: ({ children }: any) => <p className="leading-relaxed text-slate-800">{children}</p>,
+    ul: ({ children }: any) => <ul className="list-disc pl-5 space-y-1 text-slate-800">{children}</ul>,
+    ol: ({ children }: any) => <ol className="list-decimal pl-5 space-y-1 text-slate-800">{children}</ol>,
+    li: ({ children }: any) => <li className="leading-relaxed">{children}</li>,
+    a: ({ href, children }: any) => (
+      <a href={href} target="_blank" rel="noreferrer noopener" className="text-indigo-700 underline underline-offset-2">
+        {children}
+      </a>
+    ),
+    blockquote: ({ children }: any) => (
+      <blockquote className="border-l-4 border-indigo-200 pl-3 py-1 text-slate-700 bg-indigo-50/50 rounded-r-lg">{children}</blockquote>
+    ),
+    code: ({ inline, children }: any) =>
+      inline ? (
+        <code className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-900 font-mono text-[11px]">{children}</code>
+      ) : (
+        <code className="block overflow-x-auto p-3 rounded-xl bg-slate-900 text-slate-100 font-mono text-[11px]">{children}</code>
+      ),
+    pre: ({ children }: any) => <pre className="overflow-x-auto">{children}</pre>,
+    table: ({ children }: any) => (
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-[11px] border border-slate-200 rounded-xl overflow-hidden">{children}</table>
+      </div>
+    ),
+    th: ({ children }: any) => <th className="px-2 py-1.5 bg-slate-100 border-b border-slate-200 font-bold text-slate-900">{children}</th>,
+    td: ({ children }: any) => <td className="px-2 py-1.5 border-b border-slate-100 align-top">{children}</td>,
+  } as const;
 
   // Initialize Speech Recognition
   useEffect(() => {
@@ -290,10 +323,16 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
                 className={`p-3.5 rounded-2xl text-xs sm:text-sm leading-relaxed ${
                   msg.role === 'user'
                     ? 'bg-indigo-600 text-white rounded-tr-none shadow-sm'
-                    : 'bg-slate-50 border border-slate-200 text-slate-800 rounded-tl-none whitespace-pre-line'
+                    : 'bg-slate-50 border border-slate-200 text-slate-800 rounded-tl-none'
                 }`}
               >
-                {msg.content}
+                {msg.role === 'assistant' ? (
+                  <div className="space-y-2">
+                    <ReactMarkdown components={markdownComponents}>{msg.content}</ReactMarkdown>
+                  </div>
+                ) : (
+                  <span className="whitespace-pre-line">{msg.content}</span>
+                )}
               </div>
 
               {/* Message Footer: Sources & TTS Audio Button */}
@@ -355,13 +394,13 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
         )}
 
         <form onSubmit={handleSendMessage} className="flex items-center gap-2">
-          {/* Gemini AI Audio Voice Recorder */}
+          {/* Groq AI Audio Voice Recorder */}
           <AudioRecorderButton
             language={language}
             onTranscribed={(transcript) => {
               setInputQuery(transcript);
             }}
-            tooltip="Record and transcribe speech with Gemini 3.7 Flash"
+            tooltip="Record and transcribe speech with Groq Whisper"
             className="p-2"
           />
 

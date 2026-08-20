@@ -21,11 +21,11 @@ export const ShareModal: React.FC<ShareModalProps> = ({
 
   if (!alert) return null;
 
-  const shareText = `🚨 OFFICIAL DISASTER ALERT (${alert.severity.toUpperCase()})
+  const shareText = `OFFICIAL DISASTER ALERT (${alert.severity.toUpperCase()})
 Event: ${alert.event}
 Area: ${alert.areaDesc}
 ${relevanceResult && relevanceResult.distanceKm !== undefined ? `Proximity: ${relevanceResult.distanceKm === 0 ? 'INSIDE ZONE' : `${relevanceResult.distanceKm} km away`}\n` : ''}
-📋 OFFICIAL INSTRUCTIONS (SACHET/NDMA):
+OFFICIAL INSTRUCTIONS (SACHET/NDMA):
 ${alert.instruction}
 
 Valid Until: ${new Date(alert.expires).toLocaleString()}

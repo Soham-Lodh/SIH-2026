@@ -29,6 +29,7 @@ export const RealtimeWarningToast: React.FC<RealtimeWarningToastProps> = ({
   }, [topRelevance?.alert.id, dismissedId]);
 
   if (!topRelevance || isDismissed) return null;
+  if (!topRelevance.isInsideBoundary) return null;
   if (topRelevance.status !== 'CRITICAL' && topRelevance.status !== 'HIGH_PRIORITY') return null;
 
   const alert = topRelevance.alert;

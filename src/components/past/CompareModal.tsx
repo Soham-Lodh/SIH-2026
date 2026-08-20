@@ -79,6 +79,9 @@ export const CompareModal: React.FC<CompareModalProps> = ({
                   <Sparkles className="w-4 h-4 text-indigo-600" />
                   <span>AI Comparative Intelligence Synthesis</span>
                 </div>
+                <p className="text-[11px] text-slate-600 leading-relaxed">
+                  Citation tags like [S1] and [S2] correspond to the source references listed below each event.
+                </p>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
                   <div className="space-y-1">
                     <h5 className="font-bold text-slate-900">Scale of Impact:</h5>
@@ -130,6 +133,49 @@ export const CompareModal: React.FC<CompareModalProps> = ({
                     ))}
                   </tbody>
                 </table>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {bundles.map((bundle) => (
+                  <div key={`sources-${bundle.id}`} className="rounded-2xl border border-slate-200 bg-white p-4 space-y-3 shadow-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <h4 className="font-bold text-sm text-slate-900">{bundle.eventName}</h4>
+                        <p className="text-[11px] text-slate-500">{bundle.dateRange}</p>
+                      </div>
+                      <span className="px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-100 text-[10px] font-bold font-mono">
+                        {bundle.sources.length} Sources
+                      </span>
+                    </div>
+
+                    <div className="space-y-2">
+                      {bundle.sources.map((source) => (
+                        <a
+                          key={source.id}
+                          href={source.url}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                          className="block p-3 rounded-xl border border-slate-200 hover:border-indigo-200 hover:bg-indigo-50/40 transition-colors"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-mono text-[10px] font-bold border border-slate-200 shrink-0">
+                                  [{source.id}]
+                                </span>
+                                <span className="font-semibold text-sm text-slate-900 truncate">{source.title}</span>
+                              </div>
+                              <p className="text-[11px] text-slate-500 mt-1">
+                                {source.publisher} • {new Date(source.publishedAt).toLocaleDateString()}
+                              </p>
+                            </div>
+                            <ExternalLink className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                          </div>
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           ) : (
