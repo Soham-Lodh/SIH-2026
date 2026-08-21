@@ -5,6 +5,7 @@ import { apiUrl } from '../../lib/api';
 interface AudioRecorderButtonProps {
   onTranscribed: (text: string) => void;
   language?: string;
+  targetLanguage?: string;
   className?: string;
   buttonText?: string;
   tooltip?: string;
@@ -13,9 +14,10 @@ interface AudioRecorderButtonProps {
 export const AudioRecorderButton: React.FC<AudioRecorderButtonProps> = ({
   onTranscribed,
   language = 'en',
+  targetLanguage,
   className = '',
   buttonText,
-  tooltip = 'Click to record and transcribe speech with Groq AI',
+  tooltip = 'Click to record and transcribe speech',
 }) => {
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
@@ -104,6 +106,7 @@ export const AudioRecorderButton: React.FC<AudioRecorderButtonProps> = ({
             body: JSON.stringify({
               audioBase64: base64Data,
               mimeType,
+              targetLanguage: targetLanguage || language,
             }),
           });
 

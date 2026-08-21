@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { EvidenceBundle, DisasterCategory } from '../../types/disaster';
 import { EventDetailView } from './EventDetailView';
 import { CompareModal } from './CompareModal';
@@ -99,6 +99,8 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
   const [localVoiceOpen, setLocalVoiceOpen] = useState(false);
   const [activeChatBundle, setActiveChatBundle] = useState<EvidenceBundle | null>(null);
   const [isDownloadOpen, setIsDownloadOpen] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const activeLiveQueryRef = useRef('');
 
   const t = getTranslation(language);
 
@@ -125,23 +127,65 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
       setArchiveError(null);
 
       try {
-        const params = new URLSearchParams();
-        if (selectedCategory !== 'all') params.set('category', selectedCategory);
-        if (selectedState !== 'All States') params.set('state', selectedState);
-        if (selectedDecade !== 'all') params.set('decade', selectedDecade);
+        if (activeLiveQueryRef.current.trim()) {
+          const res = await fetch(apiUrl('/api/past/search'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              query: activeLiveQueryRef.current.trim(),
+              category: selectedCategory === 'all' ? undefined : selectedCategory,
+              state: selectedState === 'All States' ? undefined : selectedState,
+              targetLanguage: language,
+            }),
+          });
 
-        const archiveUrl = params.toString() ? `/api/past/archive?${params.toString()}` : '/api/past/archive';
-        const res = await fetch(apiUrl(archiveUrl));
-        const data = await res.json().catch(() => null);
+          const data = await res.json().catch(() => null);
+          if (!res.ok) {
+            throw new Error(data?.details || data?.error || 'Failed to retrieve live dossier');
+          }
 
-        if (!res.ok) {
-          throw new Error(data?.details || data?.error || 'Failed to load recent archive');
+          if (cancelled) return;
+
+          if (data?.bundle) {
+            const year = deriveYear(data.bundle);
+            const decade: DecadeFilter =
+              year < 2000 ? '1990s' : year < 2010 ? '2000s' : year < 2020 ? '2010s' : '2020s';
+
+            const enriched: HistoricalDisasterItem = {
+              ...data.bundle,
+              year,
+              numericCasualties: deriveCasualtyScore(data.bundle),
+              decade,
+            };
+
+            setEvidenceBundles((prev) => {
+              const filtered = prev.filter((item) => item.eventName.toLowerCase() !== enriched.eventName.toLowerCase());
+              return [enriched, ...filtered];
+            });
+            setSelectedBundle(enriched);
+          } else {
+            setSearchError('No matching sources were found for this query. Try a broader disaster name, district, or state.');
+          }
+        } else {
+          const params = new URLSearchParams();
+          if (selectedCategory !== 'all') params.set('category', selectedCategory);
+          if (selectedState !== 'All States') params.set('state', selectedState);
+          if (selectedDecade !== 'all') params.set('decade', selectedDecade);
+          params.set('lang', language);
+
+          const archiveUrl = params.toString() ? `/api/past/archive?${params.toString()}` : '/api/past/archive';
+          const res = await fetch(apiUrl(archiveUrl));
+          const data = await res.json().catch(() => null);
+
+          if (!res.ok) {
+            throw new Error(data?.details || data?.error || 'Failed to load recent archive');
+          }
+
+          const items = Array.isArray(data?.items) ? data.items : [];
+          if (cancelled) return;
+
+          setEvidenceBundles(items);
         }
-
-        const items = Array.isArray(data?.items) ? data.items : [];
-        if (cancelled) return;
-
-        setEvidenceBundles(items);
       } catch (error) {
         if (!cancelled) {
           setArchiveError((error as Error).message || 'Failed to load recent archive');
@@ -158,7 +202,7 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [selectedCategory, selectedState, selectedDecade]);
+  }, [language, selectedCategory, selectedState, selectedDecade]);
 
   useEffect(() => {
     if (selectedBundle) {
@@ -172,28 +216,34 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
 
     setIsSearchingLive(true);
     setSearchError(null);
+    activeLiveQueryRef.current = q;
 
     try {
       const res = await fetch(apiUrl('/api/past/search'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: q }),
+        body: JSON.stringify({
+          query: q,
+          category: selectedCategory === 'all' ? undefined : selectedCategory,
+          state: selectedState === 'All States' ? undefined : selectedState,
+          targetLanguage: language,
+        }),
       });
 
-      const data = await res.json();
-      if (!res.ok) {
-        const message = data?.details || data?.error || 'Failed to retrieve live dossier';
-        if (/no live .*sources/i.test(message)) {
-          setSearchError('No live news sources were found for this query. Try a broader disaster name, district, or state.');
+        const data = await res.json();
+        if (!res.ok) {
+          const message = data?.details || data?.error || 'Failed to retrieve live dossier';
+          if (/no live .*sources/i.test(message)) {
+          setSearchError('No matching sources were found for this query. Try a broader disaster name, district, or state.');
+            return;
+          }
+          throw new Error(message);
+        }
+
+        if (data?.noResults || !data?.bundle) {
+          setSearchError('No matching sources were found for this query. Try a broader disaster name, district, or state.');
           return;
         }
-        throw new Error(message);
-      }
-
-      if (data?.noResults || !data?.bundle) {
-        setSearchError('No live news sources were found for this query. Try a broader disaster name, district, or state.');
-        return;
-      }
 
       const year = deriveYear(data.bundle);
       const decade: DecadeFilter =
@@ -215,11 +265,50 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
       const message = (error as Error).message || 'Search failed';
       setSearchError(
         /no live .*sources/i.test(message)
-          ? 'No live news sources were found for this query. Try a broader disaster name, district, or state.'
+          ? 'No matching sources were found for this query. Try a broader disaster name, district, or state.'
           : message
       );
     } finally {
       setIsSearchingLive(false);
+    }
+  };
+
+  const handlePlayTTS = async (text: string) => {
+    const cleanText = text
+      .replace(/```[\s\S]*?```/g, ' ')
+      .replace(/!\[[^\]]*\]\([^)]+\)/g, ' ')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/\[(S\d+)\]/gi, ' ')
+      .replace(/[*_`>#-]+/g, ' ')
+      .replace(/\r?\n+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (!cleanText) return;
+
+    try {
+      const res = await fetch(apiUrl('/api/tts'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: cleanText, voiceName: 'Kore' }),
+      });
+
+      const data = await res.json().catch(() => null);
+      if (data?.audioBase64) {
+        const audio = audioRef.current || new Audio();
+        audioRef.current = audio;
+        audio.src = `data:audio/mp3;base64,${data.audioBase64}`;
+        await audio.play();
+        return;
+      }
+
+      if ('speechSynthesis' in window) {
+        const utterance = new SpeechSynthesisUtterance(cleanText);
+        utterance.lang = language === 'en' ? 'en-IN' : `${language}-IN`;
+        window.speechSynthesis.speak(utterance);
+      }
+    } catch (error) {
+      console.error('TTS playback failed:', error);
     }
   };
 
@@ -430,7 +519,7 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
           bundle={selectedBundle}
           onBack={() => setSelectedBundle(null)}
           onOpenChatWithEvent={handleOpenChatForEvent}
-          onPlayTTS={() => {}}
+          onPlayTTS={handlePlayTTS}
           language={language}
         />
 
@@ -461,11 +550,11 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
                 <h2 className="font-bold text-lg sm:text-xl text-slate-900 flex items-center gap-2">
                   <span>Indian Historical Disaster Intelligence Archive</span>
                   <span className="text-xs px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 font-mono font-bold border border-indigo-100">
-                    Live Search
+                    Current Evidence
                   </span>
                 </h2>
                 <p className="text-xs text-slate-500">
-                  Build a sourced dossier from live news and AI synthesis, then compare events or open the evidence view.
+                  Build a sourced dossier from current evidence and AI synthesis, then compare events or open the evidence view.
                 </p>
               </div>
             </div>
@@ -546,11 +635,12 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
               )}
               <AudioRecorderButton
                 language={language}
+                targetLanguage={language}
                 onTranscribed={(transcript) => {
                   setSearchQuery(transcript);
                   void handleLiveQuerySearch(transcript);
                 }}
-                tooltip="Speak disaster query in Hindi, English, etc."
+                tooltip="Speak disaster query in your preferred language"
                 className="scale-90"
               />
             </div>
@@ -561,10 +651,10 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
             disabled={isSearchingLive || !searchQuery.trim()}
             onClick={() => void handleLiveQuerySearch(searchQuery)}
             className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all shadow-sm shadow-indigo-100 shrink-0"
-            title="Search live news sources and synthesize a dossier"
+            title="Search current evidence and synthesize a dossier"
           >
             <Sparkles className="w-4 h-4" />
-            <span>{isSearchingLive ? 'Synthesizing Archive...' : 'Search Live Sources'}</span>
+            <span>{isSearchingLive ? 'Synthesizing Archive...' : 'Search Evidence'}</span>
           </button>
         </div>
 
@@ -660,7 +750,7 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
 
       {archiveError && !evidenceBundles.length && !isArchiveLoading && (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
-          Recent archive could not be loaded right now. Live search still works, and the page will recover when the API is reachable.
+          Recent archive could not be loaded right now. Current evidence search still works, and the page will recover when the service is reachable.
         </div>
       )}
 
@@ -676,13 +766,14 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
         {(searchQuery || selectedCategory !== 'all' || selectedState !== 'All States' || selectedDecade !== 'all') && (
           <button
             type="button"
-            onClick={() => {
-              setSearchQuery('');
-              setSelectedCategory('all');
-              setSelectedState('All States');
-              setSelectedDecade('all');
-              setSortOption('oldest');
-            }}
+              onClick={() => {
+                setSearchQuery('');
+                activeLiveQueryRef.current = '';
+                setSelectedCategory('all');
+                setSelectedState('All States');
+                setSelectedDecade('all');
+                setSortOption('oldest');
+              }}
             className="text-indigo-600 hover:text-indigo-800 font-semibold underline"
           >
             Reset All Filters
@@ -697,9 +788,9 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
           <div className="mx-auto w-12 h-12 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600">
             <Sparkles className="w-5 h-5" />
           </div>
-          <h3 className="font-bold text-slate-900">No live dossier yet</h3>
+          <h3 className="font-bold text-slate-900">No dossier yet</h3>
           <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
-            Search any disaster event, district, or state and we will fetch live news sources, synthesize a single cited dossier, and add it here.
+            Search any disaster event, district, or state and we will synthesize a single cited dossier and add it here.
           </p>
         </div>
       ) : (

@@ -23,6 +23,14 @@ export const UserLocationMap: React.FC<UserLocationMapProps> = ({
   const mapInstanceRef = useRef<L.Map | null>(null);
   const layerGroupRef = useRef<L.LayerGroup | null>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
+  const onSelectAlertRef = useRef(onSelectAlert);
+  const hasUserInteractedRef = useRef(false);
+  const hasInitializedViewRef = useRef(false);
+  const activeSelectionRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    onSelectAlertRef.current = onSelectAlert;
+  }, [onSelectAlert]);
 
   useEffect(() => {
     if (!mapContainerRef.current) return;
@@ -47,6 +55,10 @@ export const UserLocationMap: React.FC<UserLocationMapProps> = ({
       layerGroupRef.current = layerGroup;
       mapInstanceRef.current = map;
 
+      map.on('movestart zoomstart dragstart', () => {
+        hasUserInteractedRef.current = true;
+      });
+
       window.setTimeout(() => {
         map.invalidateSize();
         if (userLocation) {
@@ -56,6 +68,7 @@ export const UserLocationMap: React.FC<UserLocationMapProps> = ({
     } else {
       if (userLocation) {
         mapInstanceRef.current.setView([userLocation.lat, userLocation.lng], 11, { animate: false });
+        hasInitializedViewRef.current = true;
       }
     }
 
@@ -76,7 +89,7 @@ export const UserLocationMap: React.FC<UserLocationMapProps> = ({
         mapInstanceRef.current = null;
       }
     };
-  }, [userLocation]);
+  }, []);
 
   useEffect(() => {
     if (!mapInstanceRef.current || !layerGroupRef.current) return;
@@ -121,7 +134,7 @@ export const UserLocationMap: React.FC<UserLocationMapProps> = ({
           fillOpacity: 0.25,
           smoothFactor: 1,
         });
-        polygon.on('click', () => onSelectAlert(alert));
+        polygon.on('click', () => onSelectAlertRef.current(alert));
         polygon.addTo(layerGroup);
       }
 
@@ -148,7 +161,7 @@ export const UserLocationMap: React.FC<UserLocationMapProps> = ({
         const marker = L.marker(markerPos, {
           icon: L.divIcon({ html: iconHtml, className: 'near-disaster-marker', iconSize: [30, 30], iconAnchor: [15, 15] }),
         });
-        marker.on('click', () => onSelectAlert(alert));
+        marker.on('click', () => onSelectAlertRef.current(alert));
         marker.addTo(layerGroup);
 
         if (userLocation && isNearby) {
@@ -164,18 +177,23 @@ export const UserLocationMap: React.FC<UserLocationMapProps> = ({
     });
 
     const selectedPoint = selectedAlert ? resolveAlertMapPoint(selectedAlert, allAlerts.indexOf(selectedAlert)) : null;
+    const selectionChanged = activeSelectionRef.current !== selectedAlertId;
+    activeSelectionRef.current = selectedAlertId;
 
-    if (userLocation) {
+    if (userLocation && (!hasInitializedViewRef.current || selectionChanged)) {
       map.setView([userLocation.lat, userLocation.lng], 11, { animate: false });
-    } else if (selectedPoint) {
+      hasInitializedViewRef.current = true;
+    } else if (selectedPoint && !hasUserInteractedRef.current) {
       map.setView(selectedPoint, 10, { animate: false });
-    } else if (fitPoints.length > 0) {
+      hasInitializedViewRef.current = true;
+    } else if (fitPoints.length > 0 && (!hasInitializedViewRef.current || selectionChanged) && !hasUserInteractedRef.current) {
       const bounds = L.latLngBounds(fitPoints.map((pos) => L.latLng(pos[0], pos[1])));
       if (bounds.isValid()) {
         map.fitBounds(bounds.pad(0.12), { padding: [28, 28], maxZoom: 10, animate: false });
+        hasInitializedViewRef.current = true;
       }
     }
-  }, [alerts, nearbyAlerts, userLocation, selectedAlertId, onSelectAlert]);
+  }, [alerts, nearbyAlerts, userLocation, selectedAlertId]);
 
   const handleRecenter = () => {
     if (mapInstanceRef.current && userLocation) {

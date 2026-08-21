@@ -80,6 +80,15 @@ function clampToIndiaBounds([lat, lng]: [number, number]): [number, number] {
   ];
 }
 
+function isWithinIndiaBounds([lat, lng]: [number, number]): boolean {
+  return (
+    lat >= INDIA_BOUNDS.minLat &&
+    lat <= INDIA_BOUNDS.maxLat &&
+    lng >= INDIA_BOUNDS.minLng &&
+    lng <= INDIA_BOUNDS.maxLng
+  );
+}
+
 function hashString(input: string): number {
   let hash = 0;
   for (let i = 0; i < input.length; i++) {
@@ -89,7 +98,7 @@ function hashString(input: string): number {
   return Math.abs(hash);
 }
 
-function applyStableJitter(base: [number, number], seed: string, spread = 0.42): [number, number] {
+function applyStableJitter(base: [number, number], seed: string, spread = 0.68): [number, number] {
   const hash = hashString(seed || 'alert');
   const angle = (hash % 360) * (Math.PI / 180);
   const radius = ((hash % 1000) / 1000) * spread;
@@ -230,17 +239,20 @@ function deriveFallbackAlertPoint(alert: SachetAlert): [number, number] | null {
 }
 
 export function resolveAlertMapPoint(alert: SachetAlert, index = 0): [number, number] | null {
-  const base =
-    alert.centroid ||
-    (alert.polygon && alert.polygon.coordinates.length > 0 ? alert.polygon.coordinates[0] : null) ||
-    (alert.circle ? alert.circle.center : null) ||
-    deriveFallbackAlertPoint(alert);
+  const candidates = [
+    alert.centroid,
+    alert.polygon && alert.polygon.coordinates.length > 0 ? alert.polygon.coordinates[0] : null,
+    alert.circle ? alert.circle.center : null,
+    deriveFallbackAlertPoint(alert),
+  ].filter(Boolean) as [number, number][];
 
-  if (!base) {
-    return applyStableJitter(hashFallbackPoint(`${alert.id}:${alert.state || ''}:${alert.district || ''}:${alert.areaDesc || alert.event}`), alert.id, 0.18);
+  for (const candidate of candidates) {
+    if (isWithinIndiaBounds(candidate)) {
+      return applyStableJitter(candidate, `${alert.id}:${index}:${alert.state || ''}:${alert.district || ''}`);
+    }
   }
 
-  return applyStableJitter(base, `${alert.id}:${index}:${alert.state || ''}:${alert.district || ''}`);
+  return null;
 }
 
 // Icon mappings for categories
@@ -287,11 +299,19 @@ export const IndiaLiveMap: React.FC<IndiaLiveMapProps> = ({
   const mapInstanceRef = useRef<L.Map | null>(null);
   const layerGroupRef = useRef<L.LayerGroup | null>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
+  const onSelectAlertRef = useRef(onSelectAlert);
+  const hasUserInteractedRef = useRef(false);
+  const hasInitializedViewRef = useRef(false);
+  const activeFilterRef = useRef<string | null>(null);
   const [mapError, setMapError] = useState<boolean>(false);
   const [activeCategoryFilter, setActiveCategoryFilter] = useState<string | null>(null);
 
   // Active categories present in alerts
   const activeCategories = Array.from(new Set(alerts.map((a) => a.category)));
+
+  useEffect(() => {
+    onSelectAlertRef.current = onSelectAlert;
+  }, [onSelectAlert]);
 
   // Initialize Map
   useEffect(() => {
@@ -312,7 +332,7 @@ export const IndiaLiveMap: React.FC<IndiaLiveMapProps> = ({
         L.tileLayer(
           'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
           {
-            attribution: '&copy; OpenStreetMap contributors &copy; CARTO | SACHET/NDMA',
+            attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
             subdomains: 'abcd',
             maxZoom: 19,
           }
@@ -323,6 +343,10 @@ export const IndiaLiveMap: React.FC<IndiaLiveMapProps> = ({
         const layerGroup = L.layerGroup().addTo(map);
         layerGroupRef.current = layerGroup;
         mapInstanceRef.current = map;
+
+        map.on('movestart zoomstart dragstart', () => {
+          hasUserInteractedRef.current = true;
+        });
 
         window.setTimeout(() => {
           map.invalidateSize();
@@ -387,9 +411,9 @@ export const IndiaLiveMap: React.FC<IndiaLiveMapProps> = ({
           lineCap: 'round',
         });
 
-        polygon.on('click', () => {
-          onSelectAlert(alert);
-        });
+          polygon.on('click', () => {
+            onSelectAlertRef.current(alert);
+          });
 
         polygon.bindTooltip(
           `<strong>${alert.event}</strong><br/>${alert.areaDesc}<br/><span style="color:#e11d48;font-weight:bold;">${alert.severity} Warning</span>`,
@@ -408,7 +432,7 @@ export const IndiaLiveMap: React.FC<IndiaLiveMapProps> = ({
           fillColor: fillColor,
           fillOpacity: 0.2,
         });
-        circle.on('click', () => onSelectAlert(alert));
+        circle.on('click', () => onSelectAlertRef.current(alert));
         circle.addTo(layerGroup);
       }
 
@@ -442,7 +466,7 @@ export const IndiaLiveMap: React.FC<IndiaLiveMapProps> = ({
 
         const marker = L.marker(markerPos, { icon: customIcon });
         marker.on('click', () => {
-          onSelectAlert(alert);
+          onSelectAlertRef.current(alert);
         });
 
         marker.addTo(layerGroup);
@@ -478,16 +502,20 @@ export const IndiaLiveMap: React.FC<IndiaLiveMapProps> = ({
 
     const selectedAlert = selectedAlertId ? filteredAlerts.find((item) => item.id === selectedAlertId) : null;
     const selectedPosition = selectedAlert ? resolveAlertMapPoint(selectedAlert, filteredAlerts.indexOf(selectedAlert)) : null;
+    const filterChanged = activeFilterRef.current !== activeCategoryFilter;
+    activeFilterRef.current = activeCategoryFilter;
 
     if (selectedPosition) {
       map.setView(selectedPosition, Math.min(Math.max(map.getZoom(), 7), 9), { animate: false });
-    } else if (fitPositions.length > 0) {
+      hasInitializedViewRef.current = true;
+    } else if (fitPositions.length > 0 && (!hasInitializedViewRef.current || filterChanged || !hasUserInteractedRef.current)) {
       const bounds = L.latLngBounds(fitPositions.map((pos) => L.latLng(pos[0], pos[1])));
       if (bounds.isValid()) {
         map.fitBounds(bounds.pad(0.12), { padding: [28, 28], maxZoom: 9, animate: false });
+        hasInitializedViewRef.current = true;
       }
     }
-  }, [alerts, selectedAlertId, activeCategoryFilter, userCoordinates, onSelectAlert]);
+  }, [alerts, selectedAlertId, activeCategoryFilter, userCoordinates]);
 
   if (mapError) {
     return (
@@ -501,7 +529,7 @@ export const IndiaLiveMap: React.FC<IndiaLiveMapProps> = ({
             {alerts.map((a) => (
               <div
                 key={a.id}
-                onClick={() => onSelectAlert(a)}
+                onClick={() => onSelectAlertRef.current(a)}
                 className="py-2.5 cursor-pointer hover:bg-slate-50 px-2 rounded-xl flex justify-between items-center"
               >
                 <div>
@@ -574,22 +602,22 @@ export const IndiaLiveMap: React.FC<IndiaLiveMapProps> = ({
           <Activity className="w-3.5 h-3.5 text-indigo-600" />
           <span>Active Alert Legend</span>
         </div>
-        <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[11px] text-slate-700">
-          <div className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-full bg-rose-600 shadow-sm"></span>
-            <span>Extreme / Immediate</span>
+        <div className="grid grid-cols-1 gap-y-1.5 text-[11px] text-slate-700">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
+            <span>High priority hazard marker</span>
           </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-full bg-amber-500 shadow-sm"></span>
-            <span>Severe / Expected</span>
+          <div className="flex items-center gap-2">
+            <Wind className="w-3.5 h-3.5 text-amber-500" />
+            <span>Moderate hazard marker</span>
           </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-sm border border-rose-500 bg-rose-500/20"></span>
-            <span>Official Polygon</span>
+          <div className="flex items-center gap-2">
+            <Layers className="w-3.5 h-3.5 text-rose-500" />
+            <span>Official hazard boundary</span>
           </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-indigo-600 ring-2 ring-indigo-200"></span>
-            <span>User Location</span>
+          <div className="flex items-center gap-2">
+            <MapPin className="w-3.5 h-3.5 text-indigo-600" />
+            <span>Your location</span>
           </div>
         </div>
       </div>

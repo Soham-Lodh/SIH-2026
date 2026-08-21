@@ -116,6 +116,7 @@ export const TRANSLATIONS: Record<string, TranslationDictionary> = {
     voiceListening: "Listening in your language...",
     voiceSpeakPrompt: "Speak or ask anything in any Indian language",
     searchLanguagePlaceholder: "Search language (English or script)...",
+    indiaMapTitle: "All India Disaster Live Map",
   },
   hi: {
     appTitle: "आपदा सूचना एवं अनुसंधान मंच",
@@ -358,7 +359,7 @@ export function getTranslation(langCode: string): TranslationDictionary {
   return {
     ...TRANSLATIONS.en,
     ...base,
-    indiaMapTitle: base.indiaMapTitle || 'All India Disaster Live Map (Official SACHET)',
+    indiaMapTitle: base.indiaMapTitle || 'All India Disaster Live Map',
     askAIAssistant: base.askAIAssistant || base.aiAssistant || 'Ask AI Assistant',
     pastDisastersTitle: base.pastDisastersTitle || base.historicalResearchTitle || 'Historical Disaster Research',
     searchDisasterPlaceholder: base.searchDisasterPlaceholder || base.searchDisastersPlaceholder || 'Search historical disasters, events or locations (e.g., Cyclone Fani, Kerala Floods)...',

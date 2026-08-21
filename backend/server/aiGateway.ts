@@ -8,6 +8,7 @@ import {
 } from './types/disaster';
 import type { HistoricalDisasterItem } from './data/historicalDisasters';
 import { validateAndCleanCitations } from './lib/evidenceUtils';
+import { normalizeLang, translateArray, translateText } from './lib/translate';
 import { searchGoogleNews } from './googleNews';
 
 const evidenceBundleCache = new Map<string, { expiresAt: number; bundle: EvidenceBundle }>();
@@ -122,6 +123,43 @@ function stripCodeFences(text: string): string {
     .replace(/^```(?:json)?/i, '')
     .replace(/```$/i, '')
     .trim();
+}
+
+function stripMarkdownForSpeech(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/!\[[^\]]*\]\([^)]+\)/g, ' ')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/\[(S\d+)\]/gi, ' ')
+    .replace(/[*_`>#-]+/g, ' ')
+    .replace(/\r?\n+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+async function translatePreservingCitations(text: string, targetLanguage?: string): Promise<string> {
+  const lang = normalizeLang(targetLanguage);
+  if (lang === 'en') return text;
+
+  const citations = Array.from(new Set(text.match(/\[S\d+\]/gi) || []));
+  const placeholders = citations.map((citation, idx) => ({
+    citation,
+    token: `__CITE_${idx}__`,
+  }));
+
+  let working = text;
+  for (const { citation, token } of placeholders) {
+    working = working.replace(new RegExp(citation.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), token);
+  }
+
+  const translated = await translateText(working, lang);
+
+  let restored = translated;
+  for (const { citation, token } of placeholders) {
+    restored = restored.replace(new RegExp(token, 'g'), citation.toUpperCase());
+  }
+
+  return restored;
 }
 
 function inferDisasterType(text: string): DisasterCategory {
@@ -352,13 +390,13 @@ export async function buildHistoricalEvidenceBundle(
     .map((s) => `[${s.id}] Title: ${s.title}\nPublisher: ${s.publisher} (${s.publishedAt})\nSummary: ${s.summary}\nURL: ${s.url}`)
     .join('\n\n');
 
-  const systemInstruction = `You are a Senior Disaster Intelligence Research Architect.
+const systemInstruction = `You are a Senior Disaster Intelligence Research Architect.
 Synthesize the provided disaster evidence strictly using the source documents labeled [S1], [S2], etc.
 ABSOLUTE RULES:
 1. Every factual statement MUST cite its source using [S1], [S2], etc.
 2. NEVER invent casualty numbers, dates, locations, or source IDs.
 3. If information is not provided in the sources, write "Information unavailable in the retrieved sources."
-4. If sources conflict on numbers/facts, clearly list them in conflictingReports.
+4. If sources conflict on numbers/facts, prefer a compact range when the values cluster closely (for example, 23-25). If one value is a clear outlier, do not merge it into the range; report it separately in conflictingReports and explain the likely reason for the spread.
 5. Return JSON matching the requested schema.`;
 
   const prompt = `User Query: "${baseQuery}"
@@ -840,6 +878,7 @@ Analyze:
 1. Which event had broader human/infrastructure impact?
 2. How did government and rescue responses differ?
 3. What key disaster preparedness lessons emerge across these events?
+When sources disagree on a numeric fact, prefer a range if the values are tightly clustered and call out outliers separately.
 Return JSON:
 {
   "broaderImpact": "text with citations like [S1]",
@@ -889,6 +928,7 @@ export async function chatResearchAssistant(params: {
   sources: CitedSource[];
 }> {
   const { message, history, targetLanguage = 'en', associatedBundle } = params;
+  const englishMessage = await translateText(message, 'en');
 
   let evidenceSources: CitedSource[] = [];
   let contextText = '';
@@ -900,7 +940,7 @@ export async function chatResearchAssistant(params: {
       `Sources:\n` +
       evidenceSources.map((s: CitedSource) => `[${s.id}] ${s.title} (${s.publisher}): ${s.summary}`).join('\n');
   } else {
-    const articles = await searchGoogleNews(message, { isCurrentNews: false, maxResults: 4 });
+    const articles = await searchGoogleNews(englishMessage, { isCurrentNews: false, maxResults: 4 });
     evidenceSources = articles.map((art, idx) => ({
       id: `S${idx + 1}`,
       title: art.title,
@@ -950,6 +990,7 @@ Provide a professional, cited research answer:`;
   }
 
   reply = validateAndCleanCitations(reply, evidenceSources);
+  reply = await translatePreservingCitations(reply, targetLanguage);
 
   return {
     reply,
@@ -957,11 +998,63 @@ Provide a professional, cited research answer:`;
   };
 }
 
+export async function localizeEvidenceBundle(bundle: EvidenceBundle, targetLanguage?: string): Promise<EvidenceBundle> {
+  const lang = normalizeLang(targetLanguage);
+  if (lang === 'en') return bundle;
+
+  const translatedSources = await Promise.all(
+    bundle.sources.map(async (source) => ({
+      ...source,
+      title: await translateText(source.title, lang),
+      summary: await translateText(source.summary, lang),
+      keyFacts: source.keyFacts ? await translateArray(source.keyFacts, lang) : source.keyFacts,
+    })),
+  );
+
+  const translatedTimeline = await Promise.all(
+    bundle.timeline.map(async (step) => ({
+      ...step,
+      event: await translateText(step.event, lang),
+      description: await translateText(step.description, lang),
+    })),
+  );
+
+  const translatedConflicts = await Promise.all(
+    bundle.conflictingReports.map(async (conflict) => ({
+      ...conflict,
+      topic: await translateText(conflict.topic, lang),
+      details: await translateText(conflict.details, lang),
+    })),
+  );
+
+  return {
+    ...bundle,
+    eventName: await translateText(bundle.eventName, lang),
+    location: await translateText(bundle.location, lang),
+    state: await translateText(bundle.state, lang),
+    dateRange: await translateText(bundle.dateRange, lang),
+    reportedCasualties: await translateText(bundle.reportedCasualties, lang),
+    reportedDamage: await translateText(bundle.reportedDamage, lang),
+    whatHappened: await translateText(bundle.whatHappened, lang),
+    affectedAreas: await translateText(bundle.affectedAreas, lang),
+    humanImpact: await translateText(bundle.humanImpact, lang),
+    infrastructureDamage: await translateText(bundle.infrastructureDamage, lang),
+    economicImpact: await translateText(bundle.economicImpact, lang),
+    governmentResponse: await translateText(bundle.governmentResponse, lang),
+    rescueRelief: await translateText(bundle.rescueRelief, lang),
+    recovery: await translateText(bundle.recovery, lang),
+    sourceAssessment: await translateText(bundle.sourceAssessment, lang),
+    sources: translatedSources,
+    timeline: translatedTimeline,
+    conflictingReports: translatedConflicts,
+  };
+}
+
 export async function generateTTSAudio(text: string, voiceName: string = getGroqTtsVoice()): Promise<string | null> {
   const apiKey = getGroqKey('tts');
   const baseUrl = getGroqBaseUrl();
   const ttsModel = getGroqTtsModel();
-  const cleanText = text.replace(/\[S\d+\]/gi, '').replace(/[#*_`]/g, '').slice(0, 500);
+  const cleanText = stripMarkdownForSpeech(text).replace(/\[S\d+\]/gi, '').slice(0, 500);
 
   try {
     const response = await fetch(`${baseUrl}/audio/speech`, {

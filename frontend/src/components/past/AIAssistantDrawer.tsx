@@ -59,6 +59,7 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
   // Audio Playback
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const playbackTokenRef = useRef(0);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const t = getTranslation(language);
@@ -95,6 +96,31 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
     th: ({ children }: any) => <th className="px-2 py-1.5 bg-slate-100 border-b border-slate-200 font-bold text-slate-900">{children}</th>,
     td: ({ children }: any) => <td className="px-2 py-1.5 border-b border-slate-100 align-top">{children}</td>,
   } as const;
+
+  const stripMarkdownForSpeech = (text: string) =>
+    text
+      .replace(/```[\s\S]*?```/g, ' ')
+      .replace(/!\[[^\]]*\]\([^)]+\)/g, ' ')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/\[(S\d+)\]/gi, ' ')
+      .replace(/[*_`>#-]+/g, ' ')
+      .replace(/\r?\n+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+  const stopAudioPlayback = () => {
+    playbackTokenRef.current += 1;
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+
+    setIsPlayingAudio(false);
+  };
 
   // Initialize Speech Recognition
   useEffect(() => {
@@ -183,7 +209,7 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
 
     // Dynamic pipeline step simulation
     setPipelineStep('Understanding query context & keywords...');
-    setTimeout(() => setPipelineStep('Searching verified Indian news & official records...'), 400);
+    setTimeout(() => setPipelineStep('Searching current evidence and verified records...'), 400);
     setTimeout(() => setPipelineStep('Synthesizing evidence and validating citations...'), 900);
 
     try {
@@ -232,29 +258,62 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
   };
 
   const playTTS = async (text: string) => {
+    const cleanText = stripMarkdownForSpeech(text);
+    if (!cleanText) return;
+
+    if (isPlayingAudio) {
+      stopAudioPlayback();
+      return;
+    }
+
+    const playbackToken = ++playbackTokenRef.current;
+
     try {
       setIsPlayingAudio(true);
       const res = await fetch(apiUrl('/api/tts'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, voiceName: 'Kore' }),
+        body: JSON.stringify({ text: cleanText, voiceName: 'Kore' }),
       });
 
       const data = await res.json();
+      if (playbackToken !== playbackTokenRef.current) {
+        return;
+      }
+
       if (data.audioBase64) {
         const audioUrl = `data:audio/mp3;base64,${data.audioBase64}`;
         if (audioRef.current) {
           audioRef.current.src = audioUrl;
-          audioRef.current.play();
-          audioRef.current.onended = () => setIsPlayingAudio(false);
+          audioRef.current.onended = () => {
+            if (playbackToken === playbackTokenRef.current) {
+              setIsPlayingAudio(false);
+            }
+          };
+          audioRef.current.onerror = () => {
+            if (playbackToken === playbackTokenRef.current) {
+              setIsPlayingAudio(false);
+            }
+          };
+          await audioRef.current.play();
+        } else {
+          setIsPlayingAudio(false);
         }
       } else {
         // Fallback to browser SpeechSynthesis
         if ('speechSynthesis' in window) {
-          const utterance = new SpeechSynthesisUtterance(text.replace(/\[S\d+\]/g, ''));
+          const utterance = new SpeechSynthesisUtterance(cleanText);
           utterance.lang = language === 'en' ? 'en-IN' : `${language}-IN`;
-          utterance.onend = () => setIsPlayingAudio(false);
-          utterance.onerror = () => setIsPlayingAudio(false);
+          utterance.onend = () => {
+            if (playbackToken === playbackTokenRef.current) {
+              setIsPlayingAudio(false);
+            }
+          };
+          utterance.onerror = () => {
+            if (playbackToken === playbackTokenRef.current) {
+              setIsPlayingAudio(false);
+            }
+          };
           window.speechSynthesis.speak(utterance);
         } else {
           setIsPlayingAudio(false);
@@ -262,7 +321,9 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
       }
     } catch (err) {
       console.error('TTS error:', err);
-      setIsPlayingAudio(false);
+      if (playbackToken === playbackTokenRef.current) {
+        setIsPlayingAudio(false);
+      }
     }
   };
 
@@ -342,11 +403,14 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
                   <button
                     type="button"
                     onClick={() => playTTS(msg.content)}
-                    disabled={isPlayingAudio}
-                    className="inline-flex items-center gap-1 text-[11px] text-indigo-600 hover:text-indigo-800 font-medium px-2.5 py-1 rounded-xl bg-slate-100 border border-slate-200 transition-colors"
+                    className={`inline-flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded-xl border transition-colors ${
+                      isPlayingAudio
+                        ? 'text-rose-700 hover:text-rose-800 bg-rose-50 border-rose-200'
+                        : 'text-indigo-600 hover:text-indigo-800 bg-slate-100 border-slate-200'
+                    }`}
                   >
-                    <Volume2 className="w-3.5 h-3.5" />
-                    <span>{isPlayingAudio ? 'Speaking...' : 'Listen'}</span>
+                    {isPlayingAudio ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+                    <span>{isPlayingAudio ? 'Stop' : 'Listen'}</span>
                   </button>
 
                   {msg.sources && msg.sources.length > 0 && (
@@ -395,13 +459,14 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
         )}
 
         <form onSubmit={handleSendMessage} className="flex items-center gap-2">
-          {/* Groq AI Audio Voice Recorder */}
+          {/* Audio voice recorder */}
           <AudioRecorderButton
             language={language}
+            targetLanguage={language}
             onTranscribed={(transcript) => {
               setInputQuery(transcript);
             }}
-            tooltip="Record and transcribe speech with Groq Whisper"
+            tooltip="Record and transcribe speech"
             className="p-2"
           />
 

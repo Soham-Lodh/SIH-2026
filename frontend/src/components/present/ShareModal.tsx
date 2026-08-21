@@ -25,7 +25,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
 Event: ${alert.event}
 Area: ${alert.areaDesc}
 ${relevanceResult && relevanceResult.distanceKm !== undefined ? `Proximity: ${relevanceResult.distanceKm === 0 ? 'INSIDE ZONE' : `${relevanceResult.distanceKm} km away`}\n` : ''}
-OFFICIAL INSTRUCTIONS (SACHET/NDMA):
+OFFICIAL INSTRUCTIONS:
 ${alert.instruction}
 
 Valid Until: ${new Date(alert.expires).toLocaleString()}

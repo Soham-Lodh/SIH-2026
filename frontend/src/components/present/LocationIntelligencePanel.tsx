@@ -295,7 +295,7 @@ export const LocationIntelligencePanel: React.FC<LocationIntelligencePanelProps>
           <div className="p-3.5 rounded-2xl bg-amber-50/60 border border-amber-200 space-y-1.5">
             <div className="flex items-center gap-2 text-amber-900 font-bold text-xs uppercase tracking-wider">
               <AlertOctagon className="w-4 h-4 text-amber-600" />
-              <span>{t.officialInstructionTitle} (NDMA / SACHET)</span>
+              <span>{t.officialInstructionTitle}</span>
             </div>
             <p className="text-xs text-slate-800 font-medium whitespace-pre-line leading-relaxed">
               {activeAlert.instruction}

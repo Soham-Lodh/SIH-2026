@@ -43,7 +43,7 @@ export const AlertDetailDrawer: React.FC<AlertDetailDrawerProps> = ({
 
   const handleCopyInstruction = async () => {
     if (!alert) return;
-    const text = `OFFICIAL DISASTER ADVISORY (NDMA / SACHET)\nEvent: ${alert.event}\nArea: ${alert.areaDesc}\nSeverity: ${alert.severity}\n\nOFFICIAL INSTRUCTIONS:\n${alert.instruction}\n\nEmergency Helpline: ${alert.helpline || '1070 / 1077 / 112'}\nPortal: ${alert.webUrl || 'https://sachet.ndma.gov.in'}`;
+    const text = `OFFICIAL DISASTER ADVISORY\nEvent: ${alert.event}\nArea: ${alert.areaDesc}\nSeverity: ${alert.severity}\n\nOFFICIAL INSTRUCTIONS:\n${alert.instruction}\n\nEmergency Helpline: ${alert.helpline || '1070 / 1077 / 112'}\nPortal: ${alert.webUrl || ''}`;
     try {
       await navigator.clipboard.writeText(text);
       setHasCopiedInstruction(true);
@@ -71,8 +71,9 @@ export const AlertDetailDrawer: React.FC<AlertDetailDrawerProps> = ({
         alert,
         0,
         true
-      )
+    )
     : null;
+  const portalUrl = alert.officialPortalUrl || alert.webUrl || null;
 
   return (
     <div className="fixed inset-y-0 right-0 z-50 w-full sm:w-[540px] bg-white border-l border-slate-200 shadow-2xl flex flex-col justify-between overflow-hidden animate-in slide-in-from-right duration-200">
@@ -159,10 +160,10 @@ export const AlertDetailDrawer: React.FC<AlertDetailDrawerProps> = ({
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-indigo-900 flex items-center gap-1.5">
                   <ShieldCheck className="w-4 h-4 text-indigo-600" />
-                  <span>NDMA SACHET Live CAP Feed</span>
+                  <span>Live Advisory Feed</span>
                 </span>
                 <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-white text-indigo-700 border border-indigo-200">
-                  {alert.feedOrigin || 'NDMA_SACHET_LIVE'}
+                  {alert.feedOrigin || 'LIVE_FEED'}
                 </span>
               </div>
 
@@ -183,7 +184,7 @@ export const AlertDetailDrawer: React.FC<AlertDetailDrawerProps> = ({
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-rose-800 font-bold text-xs uppercase tracking-wider">
                   <AlertOctagon className="w-4 h-4 text-rose-600" />
-                  <span>{t.officialInstructionTitle} (SACHET / NDMA)</span>
+                  <span>{t.officialInstructionTitle}</span>
                 </div>
                 <button
                   type="button"
@@ -310,7 +311,7 @@ export const AlertDetailDrawer: React.FC<AlertDetailDrawerProps> = ({
               </>
             ) : (
               <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-700 leading-relaxed">
-                This alert does not expose a precise center or polygon in the current feed, so the system is showing only the verified official instruction and live news coverage.
+                This alert does not expose a precise center or polygon in the current feed, so the system is showing only the verified official instruction and supporting coverage.
               </div>
             )}
           </div>
@@ -352,15 +353,22 @@ export const AlertDetailDrawer: React.FC<AlertDetailDrawerProps> = ({
 
       {/* Drawer Footer Actions */}
       <div className="p-4 border-t border-slate-200 bg-slate-50 flex items-center gap-2.5">
-        <a
-          href={alert.officialPortalUrl || alert.webUrl || 'https://sachet.ndma.gov.in'}
-          target="_blank"
-          rel="noreferrer noopener"
-          className="flex-1 py-2.5 rounded-xl bg-white hover:bg-slate-100 text-slate-800 border border-slate-200 text-xs font-semibold flex items-center justify-center gap-1.5 shadow-xs transition-colors"
-        >
-          <ExternalLink className="w-3.5 h-3.5 text-indigo-600" />
-          <span>Official Portal</span>
-        </a>
+        {portalUrl ? (
+          <a
+            href={portalUrl}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="flex-1 py-2.5 rounded-xl bg-white hover:bg-slate-100 text-slate-800 border border-slate-200 text-xs font-semibold flex items-center justify-center gap-1.5 shadow-xs transition-colors"
+          >
+            <ExternalLink className="w-3.5 h-3.5 text-indigo-600" />
+            <span>Official Portal</span>
+          </a>
+        ) : (
+          <div className="flex-1 py-2.5 rounded-xl bg-slate-100 text-slate-500 border border-slate-200 text-xs font-semibold flex items-center justify-center gap-1.5">
+            <ExternalLink className="w-3.5 h-3.5" />
+            <span>Official Portal Unavailable</span>
+          </div>
+        )}
 
         <button
           type="button"

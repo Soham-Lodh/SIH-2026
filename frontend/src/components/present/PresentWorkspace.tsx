@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   SachetAlert,
   UserLocation,
@@ -6,6 +6,7 @@ import {
 } from '../../types/disaster';
 import { evaluateAllAlertsRelevance } from '../../lib/relevanceEngine';
 import { IndiaLiveMap } from './IndiaLiveMap';
+import { resolveAlertMapPoint } from './IndiaLiveMap';
 import { UserLocationMap } from './UserLocationMap';
 import { LocationIntelligencePanel } from './LocationIntelligencePanel';
 import { AlertDetailDrawer } from './AlertDetailDrawer';
@@ -69,7 +70,7 @@ export const PresentWorkspace: React.FC<PresentWorkspaceProps> = ({
         headers['If-None-Match'] = etagRef.current;
       }
 
-      const res = await fetch(apiUrl('/api/alerts'), { headers });
+      const res = await fetch(apiUrl(`/api/alerts?lang=${encodeURIComponent(language)}`), { headers });
 
       if (res.status === 304) {
         // Not modified, ETag cached
@@ -106,8 +107,18 @@ export const PresentWorkspace: React.FC<PresentWorkspaceProps> = ({
   // Initial fetch and 30-sec polling
   useEffect(() => {
     void fetchAlerts();
-    const interval = setInterval(fetchAlerts, 30000);
-    return () => clearInterval(interval);
+    const interval = setInterval(fetchAlerts, 60000);
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        void fetchAlerts();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, []);
 
   // Run 5-Case Geospatial Relevance Engine whenever alerts or user location updates
@@ -119,6 +130,11 @@ export const PresentWorkspace: React.FC<PresentWorkspaceProps> = ({
       setRelevanceResults([]);
     }
   }, [alerts, userLocation]);
+
+  const displayAlerts = useMemo(
+    () => alerts.filter((alert, index) => Boolean(resolveAlertMapPoint(alert, index))),
+    [alerts]
+  );
 
   // Nearby alerts for user location map
   const nearbyAlerts = relevanceResults
@@ -173,7 +189,7 @@ export const PresentWorkspace: React.FC<PresentWorkspaceProps> = ({
           }`}
         >
           <Layers className="w-3.5 h-3.5" />
-          <span>India All-Hazards ({alerts.length})</span>
+          <span>India All-Hazards ({displayAlerts.length})</span>
         </button>
         <button
           type="button"
@@ -196,7 +212,7 @@ export const PresentWorkspace: React.FC<PresentWorkspaceProps> = ({
               {t.indiaMapTitle}
             </h2>
             <span className="text-xs px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 font-mono font-medium border border-slate-200">
-              {alerts.length} Active Hazards
+              {displayAlerts.length} Active Hazards
             </span>
           </div>
         </div>
@@ -206,7 +222,7 @@ export const PresentWorkspace: React.FC<PresentWorkspaceProps> = ({
         ) : (
           <div className="space-y-3">
             <IndiaLiveMap
-              alerts={alerts}
+              alerts={displayAlerts}
               selectedAlertId={selectedAlert?.id || null}
               onSelectAlert={handleSelectAlert}
               userCoordinates={userLocation ? [userLocation.lat, userLocation.lng] : undefined}
@@ -251,7 +267,7 @@ export const PresentWorkspace: React.FC<PresentWorkspaceProps> = ({
             <UserMapSkeleton />
           ) : (
             <UserLocationMap
-              alerts={alerts}
+              alerts={displayAlerts}
               nearbyAlerts={nearbyAlerts}
               userLocation={userLocation}
               selectedAlertId={selectedAlert?.id || null}

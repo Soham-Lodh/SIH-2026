@@ -10,6 +10,35 @@ export function App() {
   const [feedStatus, setFeedStatus] = useState<'LIVE_FETCH' | 'ETAG_CACHED' | 'FALLBACK_SNAPSHOT' | 'ERROR'>('LIVE_FETCH');
   const [lastUpdated, setLastUpdated] = useState<string>(new Date().toISOString());
   const [isVoiceAssistantOpen, setIsVoiceAssistantOpen] = useState<boolean>(false);
+  const currentPath = typeof window !== 'undefined' ? window.location.pathname : '/';
+  const isKnownPath = currentPath === '/' || currentPath === '/present' || currentPath === '/past';
+
+  if (!isKnownPath) {
+    return (
+      <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col">
+        <div className="flex-1 flex items-center justify-center px-4">
+          <div className="max-w-xl w-full bg-white border border-slate-200 rounded-3xl shadow-sm p-8 sm:p-10 text-center space-y-4">
+            <div className="mx-auto w-14 h-14 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-xl">
+              404
+            </div>
+            <div className="space-y-1">
+              <h1 className="text-2xl sm:text-3xl font-bold text-slate-900">Page not found</h1>
+              <p className="text-sm text-slate-600">
+                The page you asked for does not exist in this workspace.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => window.location.assign('/')}
+              className="inline-flex items-center justify-center px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm shadow-sm transition-colors"
+            >
+              Return to dashboard
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col selection:bg-indigo-500 selection:text-white font-sans">
@@ -56,9 +85,8 @@ export function App() {
       {/* Footer */}
       <footer className="border-t border-slate-200 bg-white py-4 text-center text-xs text-slate-500">
         <div className="max-w-7xl mx-auto px-4 flex flex-wrap justify-between items-center gap-2">
-          <span className="font-medium">Official Data Sources: NDMA SACHET CAP Feed, IMD, State SDMAs, Press Information Bureau.</span>
           <span className="font-mono text-[11px] text-slate-500 bg-slate-100 px-2.5 py-1 rounded-md border border-slate-200">
-            Feed Status: {feedStatus} • 23 Indian Languages Supported
+            Feed Status: {feedStatus} • Multilingual support enabled
           </span>
         </div>
       </footer>

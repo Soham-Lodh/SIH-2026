@@ -9,8 +9,11 @@ import {
   generateTTSAudio,
   transcribeAudio,
   isGroqConfigured,
+  localizeEvidenceBundle,
   warmRecentIndiaArchive,
 } from './aiGateway';
+import { normalizeLang, translateText } from './lib/translate';
+import type { SachetAlert } from './types/disaster';
 
 const router = Router();
 warmRecentIndiaArchive(30);
@@ -20,6 +23,46 @@ let globalSearchCounter = 0;
 const GLOBAL_SEARCH_CEILING = 150; // resets periodically
 const geocodeCache = new Map<string, { expiresAt: number; payload: any }>();
 const GEOCODE_CACHE_TTL_MS = 10 * 60 * 1000;
+
+async function translatePreservingCitations(text: string, targetLanguage?: string): Promise<string> {
+  const lang = normalizeLang(targetLanguage);
+  if (lang === 'en' || !text) return text;
+
+  const citations = Array.from(new Set(text.match(/\[S\d+\]/gi) || []));
+  const tokens = citations.map((citation, idx) => ({
+    citation,
+    token: `__CITE_${idx}__`,
+  }));
+
+  let working = text;
+  for (const { citation, token } of tokens) {
+    working = working.replace(new RegExp(citation.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), token);
+  }
+
+  let translated = await translateText(working, lang);
+  for (const { citation, token } of tokens) {
+    translated = translated.replace(new RegExp(token, 'g'), citation.toUpperCase());
+  }
+
+  return translated;
+}
+
+async function localizeAlert(alert: SachetAlert, targetLanguage?: string): Promise<SachetAlert> {
+  const lang = normalizeLang(targetLanguage);
+  return {
+    ...alert,
+    event: await translateText(alert.event, lang),
+    headline: await translateText(alert.headline, lang),
+    description: await translateText(alert.description, lang),
+    instruction: await translateText(alert.instruction, lang),
+    areaDesc: await translateText(alert.areaDesc, lang),
+    sourceAgency: alert.sourceAgency ? await translateText(alert.sourceAgency, lang) : alert.sourceAgency,
+    sender: alert.sender ? await translateText(alert.sender, lang) : alert.sender,
+    state: alert.state ? await translateText(alert.state, lang) : alert.state,
+    district: alert.district ? await translateText(alert.district, lang) : alert.district,
+    helpline: alert.helpline ? await translateText(alert.helpline, lang) : alert.helpline,
+  };
+}
 
 setInterval(() => {
   globalSearchCounter = Math.max(0, globalSearchCounter - 20);
@@ -43,8 +86,10 @@ router.post('/transcribe', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Audio data is required for transcription' });
     }
 
+    const { targetLanguage } = req.body;
     const text = await transcribeAudio(audioBase64, mimeType || 'audio/webm');
-    res.json({ text, success: true });
+    const localized = normalizeLang(targetLanguage) === 'en' ? text : await translateText(text, normalizeLang(targetLanguage));
+    res.json({ text: localized, success: true });
   } catch (error) {
     res.status(500).json({
       error: 'Audio transcription failed',
@@ -61,6 +106,7 @@ router.get('/alerts', async (req: Request, res: Response) => {
   try {
     const clientEtag = req.headers['if-none-match'];
     const result = await getSachetAlerts(typeof clientEtag === 'string' ? clientEtag : undefined);
+    const targetLanguage = normalizeLang(typeof req.query.lang === 'string' ? req.query.lang : undefined);
 
     res.setHeader('ETag', result.etag);
     res.setHeader('Cache-Control', 'public, max-age=15');
@@ -70,10 +116,11 @@ router.get('/alerts', async (req: Request, res: Response) => {
     }
 
     const categories = Array.from(new Set(result.alerts.map((a) => a.category)));
+    const alerts = await Promise.all(result.alerts.map((alert) => localizeAlert(alert, targetLanguage)));
 
     res.json({
-      alerts: result.alerts,
-      activeCount: result.alerts.length,
+      alerts,
+      activeCount: alerts.length,
       categoriesCount: categories.length,
       categories,
       lastUpdated: result.lastUpdated,
@@ -197,7 +244,7 @@ router.get('/geocode', async (req: Request, res: Response) => {
  */
 router.post('/past/search', async (req: Request, res: Response) => {
   try {
-    const { query, category, state } = req.body;
+    const { query, category, state, targetLanguage } = req.body;
     if (!query || typeof query !== 'string') {
       return res.status(400).json({ error: 'Query parameter is required' });
     }
@@ -209,8 +256,9 @@ router.post('/past/search', async (req: Request, res: Response) => {
     }
     globalSearchCounter++;
 
-    const bundle = await buildHistoricalEvidenceBundle(query, category, state);
-    res.json({ bundle });
+    const englishQuery = await translateText(query, 'en');
+    const bundle = await buildHistoricalEvidenceBundle(englishQuery, category, state);
+    res.json({ bundle: await localizeEvidenceBundle(bundle, targetLanguage) });
   } catch (error) {
     const details = (error as Error).message;
     if (/no live google news sources were found/i.test(details)) {
@@ -233,14 +281,18 @@ router.post('/past/search', async (req: Request, res: Response) => {
  * GET /api/past/archive
  * Returns a live recent-disaster archive built from Google News-backed evidence bundles.
  */
-router.get('/past/archive', async (_req: Request, res: Response) => {
+router.get('/past/archive', async (req: Request, res: Response) => {
   try {
-    const categoryFilter = typeof _req.query.category === 'string' ? _req.query.category : undefined;
-    const stateFilter = typeof _req.query.state === 'string' ? _req.query.state : undefined;
-    const decadeFilter = typeof _req.query.decade === 'string' ? _req.query.decade : undefined;
+    const categoryFilter = typeof req.query.category === 'string' ? req.query.category : undefined;
+    const stateFilter = typeof req.query.state === 'string' ? req.query.state : undefined;
+    const decadeFilter = typeof req.query.decade === 'string' ? req.query.decade : undefined;
+    const targetLanguage = normalizeLang(typeof req.query.lang === 'string' ? req.query.lang : undefined);
     const items = await buildRecentIndiaArchive(30, { categoryFilter, stateFilter, decadeFilter });
+    const localizedItems = targetLanguage === 'en'
+      ? items
+      : await Promise.all(items.map((item) => localizeEvidenceBundle(item, targetLanguage)));
     res.setHeader('Cache-Control', 'public, max-age=300');
-    res.json({ items, count: items.length, retrievedAt: new Date().toISOString() });
+    res.json({ items: localizedItems, count: localizedItems.length, retrievedAt: new Date().toISOString() });
   } catch (error) {
     res.status(500).json({
       error: 'Failed to build recent disaster archive',
@@ -255,12 +307,37 @@ router.get('/past/archive', async (_req: Request, res: Response) => {
  */
 router.post('/past/compare', async (req: Request, res: Response) => {
   try {
-    const { bundles } = req.body;
+    const { bundles, targetLanguage } = req.body;
     if (!Array.isArray(bundles) || bundles.length < 2 || bundles.length > 4) {
       return res.status(400).json({ error: 'Select between 2 and 4 events to compare' });
     }
 
-    const comparison = await compareDisasterEvents(bundles);
+    const localizedBundles = await Promise.all(
+      bundles.map((bundle) => localizeEvidenceBundle(bundle, targetLanguage)),
+    );
+    const comparison = await compareDisasterEvents(localizedBundles);
+    const lang = normalizeLang(targetLanguage);
+    if (lang !== 'en') {
+      comparison.comparisonPoints = await Promise.all(
+        comparison.comparisonPoints.map(async (point) => ({
+          ...point,
+          category: await translateText(point.category, lang),
+          label: await translateText(point.label, lang),
+          values: await Promise.all(
+            point.values.map(async (value) => ({
+              ...value,
+              value: await translatePreservingCitations(value.value, lang),
+            })),
+          ),
+        })),
+      );
+      comparison.aiSynthesis = {
+        broaderImpact: await translatePreservingCitations(comparison.aiSynthesis.broaderImpact, lang),
+        responseDifferences: await translatePreservingCitations(comparison.aiSynthesis.responseDifferences, lang),
+        crossEventLessons: await translatePreservingCitations(comparison.aiSynthesis.crossEventLessons, lang),
+        citations: comparison.aiSynthesis.citations,
+      };
+    }
     res.json(comparison);
   } catch (error) {
     res.status(500).json({
