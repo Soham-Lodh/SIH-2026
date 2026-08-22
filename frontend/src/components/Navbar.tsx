@@ -11,7 +11,7 @@ import {
   RefreshCw,
   Sparkles,
 } from 'lucide-react';
-import { INDIAN_LANGUAGES, Language, getTranslation } from '../types/language';
+import { INDIAN_LANGUAGES, getTranslation, translate } from '../types/language';
 
 interface NavbarProps {
   currentTab: 'present' | 'past';
@@ -106,7 +106,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             <Radio className="w-3.5 h-3.5 animate-pulse" />
             <span>{t.presentTab.split(' ')[0]}</span>
-            <span className="hidden md:inline text-[11px] opacity-90 font-normal">(Live Map & Alerts)</span>
+            <span className="hidden md:inline text-[11px] opacity-90 font-normal">({translate(currentLanguage, 'nav.liveMap')})</span>
           </button>
           <button
             type="button"
@@ -119,7 +119,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             <Clock className="w-3.5 h-3.5" />
             <span>{t.pastTab.split(' ')[0]}</span>
-            <span className="hidden md:inline text-[11px] opacity-90 font-normal">(Historical Research)</span>
+            <span className="hidden md:inline text-[11px] opacity-90 font-normal">({translate(currentLanguage, 'nav.historical')})</span>
           </button>
         </div>
 
@@ -131,7 +131,8 @@ export const Navbar: React.FC<NavbarProps> = ({
               type="button"
               onClick={() => setIsLangOpen(!isLangOpen)}
               className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-slate-100 hover:bg-slate-200 border border-slate-200 text-xs sm:text-sm text-slate-800 transition-colors shadow-sm"
-              title="Change Language across Indian Languages"
+              title={translate(currentLanguage, 'nav.changeLanguage')}
+              aria-label={translate(currentLanguage, 'nav.changeLanguage')}
             >
               <Globe className="w-4 h-4 text-indigo-600 shrink-0" />
               <div className="text-left hidden xs:block">
@@ -188,7 +189,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     ))
                   ) : (
                     <div className="p-4 text-center text-xs text-slate-500">
-                      No matching language found
+                      {translate(currentLanguage, 'nav.noLanguage')}
                     </div>
                   )}
                 </div>
@@ -202,7 +203,8 @@ export const Navbar: React.FC<NavbarProps> = ({
               type="button"
               onClick={onOpenVoiceAssistant}
               className="p-2 rounded-xl bg-slate-100 hover:bg-indigo-50 border border-slate-200 text-indigo-600 hover:border-indigo-200 transition-colors shadow-sm"
-              title="Open Multilingual Voice Assistant"
+              title={translate(currentLanguage, 'nav.openAssistant')}
+              aria-label={translate(currentLanguage, 'nav.openAssistant')}
             >
               <Volume2 className="w-4 h-4" />
             </button>
@@ -214,7 +216,8 @@ export const Navbar: React.FC<NavbarProps> = ({
               type="button"
               onClick={onRefreshFeed}
               className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-600 hover:text-slate-900 transition-colors shadow-sm"
-              title="Refresh Official Alerts"
+              title={translate(currentLanguage, 'nav.refresh')}
+              aria-label={translate(currentLanguage, 'nav.refresh')}
             >
               <RefreshCw className="w-4 h-4" />
             </button>

@@ -35,7 +35,7 @@ import {
   Printer,
   ChevronDown,
 } from 'lucide-react';
-import { getTranslation } from '../../types/language';
+import { getTranslation, hazardLabel, translate } from '../../types/language';
 
 interface PastWorkspaceProps {
   language: string;
@@ -135,7 +135,6 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
               query: activeLiveQueryRef.current.trim(),
               category: selectedCategory === 'all' ? undefined : selectedCategory,
               state: selectedState === 'All States' ? undefined : selectedState,
-              targetLanguage: language,
             }),
           });
 
@@ -171,7 +170,6 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
           if (selectedCategory !== 'all') params.set('category', selectedCategory);
           if (selectedState !== 'All States') params.set('state', selectedState);
           if (selectedDecade !== 'all') params.set('decade', selectedDecade);
-          params.set('lang', language);
 
           const archiveUrl = params.toString() ? `/api/past/archive?${params.toString()}` : '/api/past/archive';
           const res = await fetch(apiUrl(archiveUrl));
@@ -202,7 +200,8 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [language, selectedCategory, selectedState, selectedDecade]);
+  // Do not reload archive data for a UI-only locale switch.
+  }, [selectedCategory, selectedState, selectedDecade]);
 
   useEffect(() => {
     if (selectedBundle) {
@@ -226,7 +225,6 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
           query: q,
           category: selectedCategory === 'all' ? undefined : selectedCategory,
           state: selectedState === 'All States' ? undefined : selectedState,
-          targetLanguage: language,
         }),
       });
 
@@ -368,7 +366,7 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
     }
 
     if (compareList.length >= 4) {
-      alert('You can compare a maximum of 4 disaster events simultaneously.');
+      alert(translate(language, 'history.maxCompare'));
       return;
     }
 
@@ -411,13 +409,13 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
                 {bundle.year}
               </span>
               <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold font-mono uppercase border bg-slate-100 text-slate-700 border-slate-200">
-                {bundle.disasterType}
+              {hazardLabel(language, bundle.disasterType)}
               </span>
               <span className="text-xs text-slate-500 font-medium">{bundle.state}</span>
             </div>
 
             <span className="text-[11px] font-mono font-medium px-2 py-0.5 rounded-full bg-slate-50 text-slate-600 border border-slate-200 shrink-0">
-              {bundle.sources?.length || 0} Sources
+              {translate(language, 'history.sourcesCount', { count: bundle.sources?.length || 0 })}
             </span>
           </div>
 
@@ -441,7 +439,7 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
           <div className="p-3 rounded-xl bg-rose-50/50 border border-rose-100 space-y-0.5">
             <span className="text-rose-700 font-bold text-[10px] uppercase flex items-center gap-1">
               <Users className="w-3.5 h-3.5 text-rose-600" />
-              <span>Reported Casualties</span>
+              <span>{translate(language, 'history.casualties')}</span>
             </span>
             <p className="text-slate-800 line-clamp-2 leading-relaxed text-xs font-medium">
               {bundle.reportedCasualties}
@@ -451,7 +449,7 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
           <div className="p-3 rounded-xl bg-amber-50/50 border border-amber-100 space-y-0.5">
             <span className="text-amber-800 font-bold text-[10px] uppercase flex items-center gap-1">
               <Building className="w-3.5 h-3.5 text-amber-600" />
-              <span>Estimated Damage / Loss</span>
+              <span>{translate(language, 'history.damage')}</span>
             </span>
             <p className="text-slate-800 line-clamp-2 leading-relaxed text-xs font-medium">
               {bundle.reportedDamage}
@@ -476,7 +474,7 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
               }`}
             >
               {isSelectedForCompare ? <Check className="w-3.5 h-3.5 text-white" /> : <Plus className="w-3.5 h-3.5" />}
-              <span>{isSelectedForCompare ? 'In Compare' : 'Add to Compare'}</span>
+              <span>{isSelectedForCompare ? translate(language, 'history.inCompare') : translate(language, 'history.addCompare')}</span>
             </button>
 
             <button
@@ -488,7 +486,7 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
               className="px-2.5 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-xs font-semibold text-indigo-700 flex items-center gap-1 transition-colors"
             >
               <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-              <span>Ask AI</span>
+              <span>{translate(language, 'history.askAi')}</span>
             </button>
           </div>
 
@@ -497,13 +495,13 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
               type="button"
               onClick={(e) => handleCopyCardSummary(bundle, e)}
               className="p-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-500 hover:text-slate-800 transition-colors"
-              title="Copy Evidence Summary"
+              title={translate(language, 'history.copySummary')}
             >
               <Copy className="w-3.5 h-3.5" />
             </button>
 
             <div className="flex items-center gap-1 text-xs font-bold text-indigo-600 group-hover:text-indigo-800">
-              <span>Live Dossier</span>
+              <span>{translate(language, 'history.liveDossier')}</span>
               <ArrowRight className="w-4 h-4" />
             </div>
           </div>
@@ -624,7 +622,7 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search a disaster event, district, or state to build a live dossier..."
+              placeholder={translate(language, 'history.searchPlaceholder')}
               className="w-full pl-10 pr-20 py-2.5 text-xs sm:text-sm rounded-xl bg-slate-50 border border-slate-200 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
             />
             <div className="absolute right-2 flex items-center gap-1">

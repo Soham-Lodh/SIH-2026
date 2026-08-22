@@ -3,6 +3,7 @@ import L from 'leaflet';
 import { SachetAlert, UserLocation } from '../../types/disaster';
 import { getCategoryIconSvg, resolveAlertMapPoint } from './IndiaLiveMap';
 import { Locate } from 'lucide-react';
+import { translate } from '../../types/language';
 
 interface UserLocationMapProps {
   alerts: SachetAlert[];
@@ -10,6 +11,7 @@ interface UserLocationMapProps {
   userLocation: UserLocation | null;
   selectedAlertId: string | null;
   onSelectAlert: (alert: SachetAlert) => void;
+  language: string;
 }
 
 export const UserLocationMap: React.FC<UserLocationMapProps> = ({
@@ -18,6 +20,7 @@ export const UserLocationMap: React.FC<UserLocationMapProps> = ({
   userLocation,
   selectedAlertId,
   onSelectAlert,
+  language,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
@@ -115,7 +118,7 @@ export const UserLocationMap: React.FC<UserLocationMapProps> = ({
         iconAnchor: [14, 14],
       });
       L.marker([userLocation.lat, userLocation.lng], { icon: userIcon, zIndexOffset: 2000 })
-        .bindPopup(`<strong>Your Location</strong><br/>${userLocation.cityName || 'Coordinates'}<br/>${userLocation.lat.toFixed(4)}, ${userLocation.lng.toFixed(4)}`)
+        .bindPopup(`<strong>${translate(language, 'present.yourLocation')}</strong><br/>${userLocation.cityName || 'Coordinates'}<br/>${userLocation.lat.toFixed(4)}, ${userLocation.lng.toFixed(4)}`)
         .addTo(layerGroup);
       fitPoints.push([userLocation.lat, userLocation.lng]);
     }
@@ -193,7 +196,7 @@ export const UserLocationMap: React.FC<UserLocationMapProps> = ({
         hasInitializedViewRef.current = true;
       }
     }
-  }, [alerts, nearbyAlerts, userLocation, selectedAlertId]);
+  }, [alerts, nearbyAlerts, userLocation, selectedAlertId, language]);
 
   const handleRecenter = () => {
     if (mapInstanceRef.current && userLocation) {
@@ -212,7 +215,7 @@ export const UserLocationMap: React.FC<UserLocationMapProps> = ({
           onClick={handleRecenter}
           disabled={!userLocation}
           className="p-2 rounded-xl bg-white/95 text-indigo-600 hover:text-indigo-800 border border-slate-200 shadow-md backdrop-blur-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          title="Center on My Location"
+          title={translate(language, 'present.centerLocation')}
         >
           <Locate className="w-4 h-4" />
         </button>
@@ -222,8 +225,8 @@ export const UserLocationMap: React.FC<UserLocationMapProps> = ({
         <span className="w-2.5 h-2.5 rounded-full bg-indigo-600 ring-2 ring-indigo-200"></span>
         <span className="font-medium">
           {userLocation
-            ? `${userLocation.isCustomLookup ? 'Monitored Location' : 'Live GPS Point'} (${userLocation.cityName || `${userLocation.lat.toFixed(2)}, ${userLocation.lng.toFixed(2)}`})`
-            : `India overview with ${alerts.length || nearbyAlerts.length} hazards`}
+            ? `${translate(language, userLocation.isCustomLookup ? 'present.monitoredLocation' : 'present.liveGps')} (${userLocation.cityName || `${userLocation.lat.toFixed(2)}, ${userLocation.lng.toFixed(2)}`})`
+            : translate(language, 'present.indiaOverview', { count: alerts.length || nearbyAlerts.length })}
         </span>
       </div>
     </div>

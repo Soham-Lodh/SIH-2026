@@ -20,6 +20,7 @@ import {
   MapPin,
   RefreshCw,
 } from 'lucide-react';
+import { hazardLabel, translate } from '../../types/language';
 
 interface IndiaLiveMapProps {
   alerts: SachetAlert[];
@@ -416,7 +417,7 @@ export const IndiaLiveMap: React.FC<IndiaLiveMapProps> = ({
           });
 
         polygon.bindTooltip(
-          `<strong>${alert.event}</strong><br/>${alert.areaDesc}<br/><span style="color:#e11d48;font-weight:bold;">${alert.severity} Warning</span>`,
+          `<strong>${alert.event}</strong><br/>${alert.areaDesc}<br/><span style="color:#e11d48;font-weight:bold;">${alert.severity}</span>`,
           { sticky: true, className: 'leaflet-disaster-tooltip' }
         );
 
@@ -452,7 +453,7 @@ export const IndiaLiveMap: React.FC<IndiaLiveMapProps> = ({
               ${getCategoryIconSvg(alert.category, alert.severity)}
             </div>
             <div class="mt-1 px-2 py-0.5 rounded-full bg-slate-900 text-[9px] font-bold text-white tracking-tight whitespace-nowrap shadow-sm">
-              ${alert.category}
+              ${hazardLabel(language, alert.category)}
             </div>
           </div>
         `;
@@ -479,7 +480,7 @@ export const IndiaLiveMap: React.FC<IndiaLiveMapProps> = ({
         <div class="relative flex items-center justify-center">
           <div class="w-4 h-4 rounded-full bg-indigo-600 ring-4 ring-indigo-200 shadow-lg animate-pulse"></div>
           <div class="absolute -top-6 px-2 py-0.5 rounded-full bg-indigo-600 text-white font-bold text-[9px] shadow whitespace-nowrap">
-            Your Location
+            ${translate(language, 'present.yourLocation')}
           </div>
         </div>
       `;
@@ -515,7 +516,7 @@ export const IndiaLiveMap: React.FC<IndiaLiveMapProps> = ({
         hasInitializedViewRef.current = true;
       }
     }
-  }, [alerts, selectedAlertId, activeCategoryFilter, userCoordinates]);
+  }, [alerts, selectedAlertId, activeCategoryFilter, userCoordinates, language]);
 
   if (mapError) {
     return (
@@ -523,7 +524,7 @@ export const IndiaLiveMap: React.FC<IndiaLiveMapProps> = ({
         <div className="space-y-3">
           <div className="flex items-center gap-2 text-amber-700 font-semibold text-sm">
             <AlertTriangle className="w-5 h-5" />
-            <span>Map Tile Rendering Offline - Text Alert Fallback Active</span>
+            <span>{translate(language, 'present.mapOffline')}</span>
           </div>
           <div className="divide-y divide-slate-100 max-h-60 overflow-y-auto">
             {alerts.map((a) => (
@@ -549,7 +550,7 @@ export const IndiaLiveMap: React.FC<IndiaLiveMapProps> = ({
           className="self-start px-4 py-2 rounded-xl bg-slate-100 text-xs font-semibold text-slate-700 hover:bg-slate-200 flex items-center gap-1.5 transition-colors"
         >
           <RefreshCw className="w-3.5 h-3.5" />
-          <span>Retry Map Layer</span>
+          <span>{translate(language, 'present.retryMap')}</span>
         </button>
       </div>
     );
@@ -572,7 +573,7 @@ export const IndiaLiveMap: React.FC<IndiaLiveMapProps> = ({
           }`}
         >
           <Layers className="w-3.5 h-3.5 text-indigo-400" />
-          <span>All Hazards ({alerts.length})</span>
+          <span>{translate(language, 'present.allHazards', { count: alerts.length })}</span>
         </button>
 
         {activeCategories.map((cat) => (
@@ -586,7 +587,7 @@ export const IndiaLiveMap: React.FC<IndiaLiveMapProps> = ({
                 : 'bg-white/95 text-slate-700 border border-slate-200 hover:bg-slate-50'
             }`}
           >
-            <span>{cat}</span>
+            <span>{hazardLabel(language, cat)}</span>
             <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
               activeCategoryFilter === cat ? 'bg-rose-700 text-white' : 'bg-slate-100 text-slate-600'
             }`}>
@@ -600,24 +601,24 @@ export const IndiaLiveMap: React.FC<IndiaLiveMapProps> = ({
       <div className="absolute bottom-3 left-3 z-10 bg-white/95 backdrop-blur-md border border-slate-200 rounded-2xl p-3 shadow-lg max-w-xs hidden sm:block pointer-events-auto text-xs space-y-1.5">
         <div className="font-bold text-[11px] uppercase tracking-wider text-slate-500 flex items-center gap-1">
           <Activity className="w-3.5 h-3.5 text-indigo-600" />
-          <span>Active Alert Legend</span>
+          <span>{translate(language, 'present.legend')}</span>
         </div>
         <div className="grid grid-cols-1 gap-y-1.5 text-[11px] text-slate-700">
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
-            <span>High priority hazard marker</span>
+            <span>{translate(language, 'present.highPriority')}</span>
           </div>
           <div className="flex items-center gap-2">
             <Wind className="w-3.5 h-3.5 text-amber-500" />
-            <span>Moderate hazard marker</span>
+            <span>{translate(language, 'present.moderatePriority')}</span>
           </div>
           <div className="flex items-center gap-2">
             <Layers className="w-3.5 h-3.5 text-rose-500" />
-            <span>Official hazard boundary</span>
+            <span>{translate(language, 'present.boundary')}</span>
           </div>
           <div className="flex items-center gap-2">
             <MapPin className="w-3.5 h-3.5 text-indigo-600" />
-            <span>Your location</span>
+            <span>{translate(language, 'present.yourLocation')}</span>
           </div>
         </div>
       </div>

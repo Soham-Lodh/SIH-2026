@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { getLocale, translate } from './types/language';
 import { Navbar } from './components/Navbar';
 import { PresentWorkspace } from './components/present/PresentWorkspace';
 import { PastWorkspace } from './components/past/PastWorkspace';
@@ -6,12 +7,19 @@ import { AIAssistantDrawer } from './components/past/AIAssistantDrawer';
 
 export function App() {
   const [currentTab, setCurrentTab] = useState<'present' | 'past'>('present');
-  const [currentLanguage, setCurrentLanguage] = useState<string>('en');
+  const [currentLanguage, setCurrentLanguage] = useState<string>(() =>
+    typeof window === 'undefined' ? 'en' : window.localStorage.getItem('disaster-intelligence.language') || 'en'
+  );
   const [feedStatus, setFeedStatus] = useState<'LIVE_FETCH' | 'ETAG_CACHED' | 'FALLBACK_SNAPSHOT' | 'ERROR'>('LIVE_FETCH');
   const [lastUpdated, setLastUpdated] = useState<string>(new Date().toISOString());
   const [isVoiceAssistantOpen, setIsVoiceAssistantOpen] = useState<boolean>(false);
   const currentPath = typeof window !== 'undefined' ? window.location.pathname : '/';
   const isKnownPath = currentPath === '/' || currentPath === '/present' || currentPath === '/past';
+
+  useEffect(() => {
+    window.localStorage.setItem('disaster-intelligence.language', currentLanguage);
+    document.documentElement.lang = getLocale(currentLanguage);
+  }, [currentLanguage]);
 
   if (!isKnownPath) {
     return (
@@ -22,9 +30,9 @@ export function App() {
               404
             </div>
             <div className="space-y-1">
-              <h1 className="text-2xl sm:text-3xl font-bold text-slate-900">Page not found</h1>
+              <h1 className="text-2xl sm:text-3xl font-bold text-slate-900">{translate(currentLanguage, 'error.notFoundTitle')}</h1>
               <p className="text-sm text-slate-600">
-                The page you asked for does not exist in this workspace.
+                {translate(currentLanguage, 'error.notFoundBody')}
               </p>
             </div>
             <button
@@ -32,7 +40,7 @@ export function App() {
               onClick={() => window.location.assign('/')}
               className="inline-flex items-center justify-center px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm shadow-sm transition-colors"
             >
-              Return to dashboard
+              {translate(currentLanguage, 'error.returnDashboard')}
             </button>
           </div>
         </div>
