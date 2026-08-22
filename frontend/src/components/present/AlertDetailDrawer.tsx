@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { SachetAlert } from '../../types/disaster';
 import {
   X,
@@ -21,8 +21,9 @@ import {
   LifeBuoy,
   Check,
 } from 'lucide-react';
-import { getLocale, getTranslation, translate } from '../../types/language';
+import { alertEnumLabel, getLocale, getTranslation, translate } from '../../types/language';
 import { generateEvacuationGuidance } from '../../lib/relevanceEngine';
+import { useLocalizedPresentation } from '../../lib/localizedPresentation';
 
 interface AlertDetailDrawerProps {
   alert: SachetAlert | null;
@@ -74,6 +75,16 @@ export const AlertDetailDrawer: React.FC<AlertDetailDrawerProps> = ({
     )
     : null;
   const portalUrl = alert.officialPortalUrl || alert.webUrl || null;
+  const presentationEntries = useMemo(() => [
+    { id: 'event', text: alert.event }, { id: 'headline', text: alert.headline },
+    { id: 'description', text: alert.description }, { id: 'instruction', text: alert.instruction },
+    { id: 'area', text: alert.areaDesc }, { id: 'guidance.recommendation', text: guidance ? `Recommendation: Move at least ${guidance.safeDistanceKm} km towards ${guidance.recommendedDirection} to reach safe designated relief shelters and high elevation.` : '' },
+    ...(guidance?.actionableMeasures || []).map((text, index) => ({ id: `measure.${index}`, text })),
+    ...(guidance?.dos || []).map((text, index) => ({ id: `dos.${index}`, text })),
+    ...(guidance?.donts || []).map((text, index) => ({ id: `donts.${index}`, text })),
+    ...(guidance?.emergencyContacts || []).flatMap((contact, index) => [{ id: `contact.${index}.label`, text: contact.label }, { id: `contact.${index}.description`, text: contact.description }]),
+  ], [alert, guidance]);
+  const localized = useLocalizedPresentation(language, presentationEntries);
 
   return (
     <div className="fixed inset-y-0 right-0 z-50 w-full sm:w-[540px] bg-white border-l border-slate-200 shadow-2xl flex flex-col justify-between overflow-hidden animate-in slide-in-from-right duration-200">
@@ -85,7 +96,7 @@ export const AlertDetailDrawer: React.FC<AlertDetailDrawerProps> = ({
           </div>
           <div className="min-w-0">
             <h3 className="font-bold text-sm sm:text-base text-slate-900 truncate">
-              {alert.event}
+              {localized('event', alert.event)}
             </h3>
             <span className="text-[11px] text-slate-500 font-mono block truncate">
               ID: {alert.identifier || alert.id}
@@ -196,31 +207,31 @@ export const AlertDetailDrawer: React.FC<AlertDetailDrawerProps> = ({
                 </button>
               </div>
               <p className="text-xs sm:text-sm text-slate-900 font-medium whitespace-pre-line leading-relaxed">
-                {alert.instruction}
+                {localized('instruction', alert.instruction)}
               </p>
             </div>
 
             {/* Headline & Overview */}
             <div className="space-y-1.5">
-              <h4 className="font-bold text-sm sm:text-base text-slate-900">{alert.headline}</h4>
-              <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">{alert.description}</p>
+              <h4 className="font-bold text-sm sm:text-base text-slate-900">{localized('headline', alert.headline)}</h4>
+              <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">{localized('description', alert.description)}</p>
             </div>
 
             {/* Official CAP Metadata Grid */}
             <div className="grid grid-cols-2 gap-2 text-xs">
               <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
                 <span className="text-slate-500 text-[10px] uppercase font-bold">{translate(language, 'alerts.severityUrgency')}</span>
-                <div className="font-semibold text-slate-900 mt-0.5">{alert.severity} • {alert.urgency}</div>
+                <div className="font-semibold text-slate-900 mt-0.5">{alertEnumLabel(language, alert.severity)} / {alertEnumLabel(language, alert.urgency)}</div>
               </div>
               <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
                 <span className="text-slate-500 text-[10px] uppercase font-bold">{translate(language, 'alerts.certainty')}</span>
-                <div className="font-semibold text-slate-900 mt-0.5">{alert.certainty}</div>
+                <div className="font-semibold text-slate-900 mt-0.5">{alertEnumLabel(language, alert.certainty)}</div>
               </div>
               <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 col-span-2">
                 <span className="text-slate-500 text-[10px] uppercase font-bold">{translate(language, 'alerts.affectedArea')}</span>
                 <div className="font-semibold text-slate-900 mt-0.5 flex items-center gap-1">
                   <MapPin className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                  <span>{alert.areaDesc}</span>
+                  <span>{localized('area', alert.areaDesc)}</span>
                 </div>
               </div>
               <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
@@ -260,7 +271,7 @@ export const AlertDetailDrawer: React.FC<AlertDetailDrawerProps> = ({
                     <span>{translate(language, 'alerts.evacuationProtocol')}</span>
                   </div>
                   <p className="text-xs text-slate-800 leading-relaxed font-medium">
-                    Recommendation: Move at least {guidance.safeDistanceKm} km towards {guidance.recommendedDirection} to reach safe designated relief shelters and high elevation.
+                    {localized('guidance.recommendation', `Recommendation: Move at least ${guidance.safeDistanceKm} km towards ${guidance.recommendedDirection} to reach safe designated relief shelters and high elevation.`)}
                   </p>
                 </div>
 
@@ -275,7 +286,7 @@ export const AlertDetailDrawer: React.FC<AlertDetailDrawerProps> = ({
                         className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-800 leading-relaxed flex items-start gap-2"
                       >
                         <span className="w-2 h-2 rounded-full bg-indigo-600 mt-1 shrink-0" />
-                        <span>{measure}</span>
+                        <span>{localized(`measure.${idx}`, measure)}</span>
                       </div>
                     ))}
                   </div>
@@ -290,7 +301,7 @@ export const AlertDetailDrawer: React.FC<AlertDetailDrawerProps> = ({
                     {guidance.dos.map((d, idx) => (
                       <div key={idx} className="text-[11px] text-slate-700 leading-snug flex items-start gap-1">
                         <Check className="w-3 h-3 text-emerald-600 mt-0.5 shrink-0" />
-                        <span>{d}</span>
+                        <span>{localized(`dos.${idx}`, d)}</span>
                       </div>
                     ))}
                   </div>
@@ -303,7 +314,7 @@ export const AlertDetailDrawer: React.FC<AlertDetailDrawerProps> = ({
                     {guidance.donts.map((d, idx) => (
                       <div key={idx} className="text-[11px] text-slate-700 leading-snug flex items-start gap-1">
                         <XCircle className="w-3 h-3 text-rose-600 mt-0.5 shrink-0" />
-                        <span>{d}</span>
+                        <span>{localized(`donts.${idx}`, d)}</span>
                       </div>
                     ))}
                   </div>
@@ -336,8 +347,8 @@ export const AlertDetailDrawer: React.FC<AlertDetailDrawerProps> = ({
                   className="p-3 rounded-xl bg-slate-50 border border-slate-200 hover:border-rose-300 hover:bg-white transition-all flex items-center justify-between group"
                 >
                   <div>
-                    <div className="text-xs font-bold text-slate-900">{c.label}</div>
-                    <div className="text-[11px] text-slate-500">{c.description}</div>
+                    <div className="text-xs font-bold text-slate-900">{localized(`contact.${idx}.label`, c.label)}</div>
+                    <div className="text-[11px] text-slate-500">{localized(`contact.${idx}.description`, c.description)}</div>
                   </div>
                   <div className="px-3 py-1.5 rounded-lg bg-rose-50 group-hover:bg-rose-600 text-rose-700 group-hover:text-white font-mono font-bold text-xs shrink-0 transition-colors flex items-center gap-1.5">
                     <PhoneCall className="w-3 h-3" />
