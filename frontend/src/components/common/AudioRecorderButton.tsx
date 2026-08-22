@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { Mic, Square, Loader2, AlertCircle } from 'lucide-react';
 import { apiUrl } from '../../lib/api';
+import { translate } from '../../types/language';
 
 interface AudioRecorderButtonProps {
   onTranscribed: (text: string) => void;
@@ -17,7 +18,7 @@ export const AudioRecorderButton: React.FC<AudioRecorderButtonProps> = ({
   targetLanguage,
   className = '',
   buttonText,
-  tooltip = 'Click to record and transcribe speech',
+  tooltip,
 }) => {
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
@@ -80,7 +81,7 @@ export const AudioRecorderButton: React.FC<AudioRecorderButtonProps> = ({
       }, 1000);
     } catch (err) {
       console.error('Microphone access error:', err);
-      setErrorMessage('Microphone access denied or unavailable.');
+      setErrorMessage(translate(language, 'voice.microphoneDenied'));
       setIsRecording(false);
     }
   };
@@ -118,11 +119,11 @@ export const AudioRecorderButton: React.FC<AudioRecorderButtonProps> = ({
           if (data.text) {
             onTranscribed(data.text);
           } else {
-            setErrorMessage('No speech detected. Please speak clearly.');
+            setErrorMessage(translate(language, 'voice.noSpeech'));
           }
         } catch (serverErr) {
           console.error('Transcription API error:', serverErr);
-          setErrorMessage('Transcription error. Please try again.');
+          setErrorMessage(translate(language, 'voice.transcriptionError'));
         } finally {
           setIsTranscribing(false);
         }
@@ -130,7 +131,7 @@ export const AudioRecorderButton: React.FC<AudioRecorderButtonProps> = ({
     } catch (err) {
       console.error('Error processing audio data:', err);
       setIsTranscribing(false);
-      setErrorMessage('Failed to process audio.');
+      setErrorMessage(translate(language, 'voice.processingError'));
     }
   };
 
@@ -141,10 +142,10 @@ export const AudioRecorderButton: React.FC<AudioRecorderButtonProps> = ({
           type="button"
           onClick={stopRecording}
           className={`flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-md shadow-rose-200 animate-pulse transition-all ${className}`}
-          title="Click to stop recording and transcribe"
+          title={translate(language, 'voice.stop', { seconds: recordingDuration })}
         >
           <Square className="w-3.5 h-3.5 fill-current" />
-          <span>Stop ({recordingDuration}s)</span>
+          <span>{translate(language, 'voice.stop', { seconds: recordingDuration })}</span>
         </button>
       ) : isTranscribing ? (
         <button
@@ -153,14 +154,14 @@ export const AudioRecorderButton: React.FC<AudioRecorderButtonProps> = ({
           className={`flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-700 font-semibold text-xs transition-all ${className}`}
         >
           <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          <span>Transcribing...</span>
+          <span>{translate(language, 'voice.transcribing')}</span>
         </button>
       ) : (
         <button
           type="button"
           onClick={startRecording}
           className={`flex items-center justify-center p-2 rounded-xl bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 text-slate-600 border border-slate-200 transition-all ${className}`}
-          title={tooltip}
+          title={tooltip || translate(language, 'voice.record')}
         >
           <Mic className="w-4 h-4" />
           {buttonText && <span className="ml-1 text-xs font-semibold">{buttonText}</span>}

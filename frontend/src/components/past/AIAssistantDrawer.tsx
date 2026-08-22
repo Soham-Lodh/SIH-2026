@@ -16,7 +16,7 @@ import {
   RefreshCw,
   Globe,
 } from 'lucide-react';
-import { INDIAN_LANGUAGES, getTranslation } from '../../types/language';
+import { INDIAN_LANGUAGES, getTranslation, translate } from '../../types/language';
 import { ChatSkeleton } from '../common/Skeletons';
 import { AudioRecorderButton } from '../common/AudioRecorderButton';
 import ReactMarkdown from 'react-markdown';
@@ -234,7 +234,7 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
       const assistantMsg: ChatMessage = {
         id: `a-${Date.now()}`,
         role: 'assistant',
-        content: data.reply || 'Information unavailable in the retrieved sources.',
+          content: data.reply || translate(language, 'assistant.unavailable'),
         sources: data.sources || [],
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
@@ -247,7 +247,7 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
         {
           id: `a-err-${Date.now()}`,
           role: 'assistant',
-          content: 'Unable to complete AI query at this moment. Please check your connection.',
+          content: translate(language, 'assistant.error'),
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         },
       ]);
@@ -347,7 +347,7 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
               </span>
             </h3>
             <p className="text-[11px] text-slate-500">
-              Grounded AI with Multilingual Speech Recognition
+              {translate(language, 'assistant.grounded')}
             </p>
           </div>
         </div>
@@ -410,12 +410,12 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
                     }`}
                   >
                     {isPlayingAudio ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
-                    <span>{isPlayingAudio ? 'Stop' : 'Listen'}</span>
+                    <span>{isPlayingAudio ? translate(language, 'common.stop') : translate(language, 'common.listen')}</span>
                   </button>
 
                   {msg.sources && msg.sources.length > 0 && (
                     <div className="flex items-center gap-1 text-[10px] text-slate-500 font-mono">
-                      <span>Sources:</span>
+                      <span>{translate(language, 'common.sources')}:</span>
                       {msg.sources.map((s) => (
                         <a
                           key={s.id}
@@ -441,7 +441,7 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
           <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2 animate-pulse">
             <div className="flex items-center gap-2 text-xs text-indigo-600 font-medium">
               <Sparkles className="w-3.5 h-3.5 animate-spin" />
-              <span>{pipelineStep || 'Grounded Intelligence synthesis in progress...'}</span>
+              <span>{pipelineStep || translate(language, 'assistant.pipeline')}</span>
             </div>
           </div>
         )}
@@ -454,7 +454,7 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
         {isListening && (
           <div className="flex items-center justify-center gap-2 py-1 px-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs animate-pulse">
             <span className="w-2 h-2 rounded-full bg-rose-600"></span>
-            <span>Listening in {activeLangObj.name} ({activeLangObj.nativeName})... Speak now!</span>
+            <span>{translate(language, 'assistant.listening', { language: `${activeLangObj.name} (${activeLangObj.nativeName})` })}</span>
           </div>
         )}
 
@@ -466,7 +466,7 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
             onTranscribed={(transcript) => {
               setInputQuery(transcript);
             }}
-            tooltip="Record and transcribe speech"
+            tooltip={translate(language, 'assistant.record')}
             className="p-2"
           />
 
@@ -476,8 +476,8 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
             onChange={(e) => setInputQuery(e.target.value)}
             placeholder={
               isListening
-                ? 'Listening...'
-                : `Ask in ${activeLangObj.name} or English...`
+                ? translate(language, 'voice.transcribing')
+                : translate(language, 'assistant.placeholder', { language: activeLangObj.name })
             }
             className="flex-1 px-3.5 py-2 text-xs sm:text-sm rounded-xl bg-white border border-slate-200 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 shadow-sm"
           />

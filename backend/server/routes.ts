@@ -106,7 +106,6 @@ router.get('/alerts', async (req: Request, res: Response) => {
   try {
     const clientEtag = req.headers['if-none-match'];
     const result = await getSachetAlerts(typeof clientEtag === 'string' ? clientEtag : undefined);
-    const targetLanguage = normalizeLang(typeof req.query.lang === 'string' ? req.query.lang : undefined);
 
     res.setHeader('ETag', result.etag);
     res.setHeader('Cache-Control', 'public, max-age=15');
@@ -116,7 +115,9 @@ router.get('/alerts', async (req: Request, res: Response) => {
     }
 
     const categories = Array.from(new Set(result.alerts.map((a) => a.category)));
-    const alerts = await Promise.all(result.alerts.map((alert) => localizeAlert(alert, targetLanguage)));
+    // CAP/SACHET wording is authoritative source content. Keep it canonical and
+    // let the client localize only its own surrounding UI.
+    const alerts = result.alerts;
 
     res.json({
       alerts,

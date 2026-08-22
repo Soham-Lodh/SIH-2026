@@ -14,7 +14,7 @@ import { RealtimeWarningToast } from './RealtimeWarningToast';
 import { ShareModal } from './ShareModal';
 import { IndiaMapSkeleton, UserMapSkeleton, LocationSkeleton } from '../common/Skeletons';
 import { Radio, Layers, MapPin, RefreshCw, AlertTriangle } from 'lucide-react';
-import { getTranslation } from '../../types/language';
+import { translate } from '../../types/language';
 import { apiUrl } from '../../lib/api';
 
 interface PresentWorkspaceProps {
@@ -38,8 +38,6 @@ export const PresentWorkspace: React.FC<PresentWorkspaceProps> = ({
   const [shareAlert, setShareAlert] = useState<SachetAlert | null>(null);
   const [shareRelevance, setShareRelevance] = useState<RelevanceResult | null>(null);
   const etagRef = useRef<string | null>(null);
-
-  const t = getTranslation(language);
 
   useEffect(() => {
     if (!navigator.geolocation) return;
@@ -70,7 +68,8 @@ export const PresentWorkspace: React.FC<PresentWorkspaceProps> = ({
         headers['If-None-Match'] = etagRef.current;
       }
 
-      const res = await fetch(apiUrl(`/api/alerts?lang=${encodeURIComponent(language)}`), { headers });
+      // Locale changes presentation only; canonical official alert data is never refetched for translation.
+      const res = await fetch(apiUrl('/api/alerts'), { headers });
 
       if (res.status === 304) {
         // Not modified, ETag cached
@@ -189,7 +188,7 @@ export const PresentWorkspace: React.FC<PresentWorkspaceProps> = ({
           }`}
         >
           <Layers className="w-3.5 h-3.5" />
-          <span>India All-Hazards ({displayAlerts.length})</span>
+          <span>{translate(language, 'present.allHazards', { count: displayAlerts.length })}</span>
         </button>
         <button
           type="button"
@@ -199,7 +198,7 @@ export const PresentWorkspace: React.FC<PresentWorkspaceProps> = ({
           }`}
         >
           <MapPin className="w-3.5 h-3.5" />
-          <span>Near My Location ({nearbyAlerts.length})</span>
+          <span>{translate(language, 'present.nearMe', { count: nearbyAlerts.length })}</span>
         </button>
       </div>
 
@@ -209,10 +208,10 @@ export const PresentWorkspace: React.FC<PresentWorkspaceProps> = ({
           <div className="flex items-center gap-2">
             <Radio className="w-4 h-4 text-rose-500 animate-pulse" />
             <h2 className="font-bold text-sm sm:text-base text-slate-900">
-              {t.indiaMapTitle}
+              {translate(language, 'present.mapTitle')}
             </h2>
             <span className="text-xs px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 font-mono font-medium border border-slate-200">
-              {displayAlerts.length} Active Hazards
+              {translate(language, 'present.activeHazards', { count: displayAlerts.length })}
             </span>
           </div>
         </div>
@@ -233,7 +232,7 @@ export const PresentWorkspace: React.FC<PresentWorkspaceProps> = ({
               <div className="rounded-2xl bg-white border border-dashed border-slate-300 px-4 py-3 shadow-sm flex items-center gap-3">
                 <MapPin className="w-5 h-5 text-indigo-600 shrink-0" />
                 <p className="text-xs text-slate-600 leading-relaxed">
-                  Location access is optional. You can still browse the India map, filter hazards, and open alert details without GPS. Proximity guidance activates after you share a location.
+                  {translate(language, 'present.locationOptional')}
                 </p>
               </div>
             )}
@@ -272,6 +271,7 @@ export const PresentWorkspace: React.FC<PresentWorkspaceProps> = ({
               userLocation={userLocation}
               selectedAlertId={selectedAlert?.id || null}
               onSelectAlert={handleSelectAlert}
+              language={language}
             />
           )}
         </div>
