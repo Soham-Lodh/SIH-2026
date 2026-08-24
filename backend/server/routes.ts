@@ -12,7 +12,7 @@ import {
   localizeEvidenceBundle,
   warmRecentIndiaArchive,
 } from './aiGateway';
-import { normalizeLang, translateText } from './lib/translate';
+import { normalizeLang, resolveLocalizedPresentation, translateText } from './lib/translate';
 import type { SachetAlert } from './types/disaster';
 
 const router = Router();
@@ -133,6 +133,28 @@ router.get('/alerts', async (req: Request, res: Response) => {
       error: 'Failed to retrieve SACHET alerts',
       details: (error as Error).message,
     });
+  }
+});
+
+/**
+ * POST /api/localize/presentation
+ * Resolves transient display translations while preserving canonical client data.
+ */
+router.post('/localize/presentation', async (req: Request, res: Response) => {
+  const language = normalizeLang(typeof req.body?.language === 'string' ? req.body.language : undefined);
+  const entries = Array.isArray(req.body?.entries) ? req.body.entries.slice(0, 200) : [];
+  try {
+    const items = await Promise.all(entries.map(async (entry: unknown, index: number) => {
+      const record = entry && typeof entry === 'object' ? entry as { id?: unknown; text?: unknown } : {};
+      const id = typeof record.id === 'string' ? record.id : String(index);
+      const source = typeof record.text === 'string' ? record.text.slice(0, 12000) : '';
+      const localized = await resolveLocalizedPresentation(source, language);
+      return { id, ...localized };
+    }));
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    res.json({ language, items });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to localize presentation text', details: (error as Error).message });
   }
 });
 

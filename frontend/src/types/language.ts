@@ -429,3 +429,13 @@ const HAZARD_LABELS: Record<string, Record<string, string>> = {
 export function hazardLabel(language: string, category: string): string {
   return HAZARD_LABELS[language]?.[category] || category;
 }
+
+const ALERT_ENUM_LABELS: Record<string, Record<string, string>> = {
+  en: {},
+  hi: { Extreme: 'अत्यंत', Severe: 'गंभीर', Moderate: 'मध्यम', Minor: 'न्यून', Unknown: 'अज्ञात', Immediate: 'तत्काल', Expected: 'अपेक्षित', Future: 'भविष्य', Past: 'पूर्व', Observed: 'देखा गया', Likely: 'संभावित', Possible: 'संभव', Unlikely: 'असंभावित' },
+  bn: { Extreme: 'চরম', Severe: 'তীব্র', Moderate: 'মধ্যম', Minor: 'সামান্য', Unknown: 'অজানা', Immediate: 'তাৎক্ষণিক', Expected: 'প্রত্যাশিত', Future: 'ভবিষ্যৎ', Past: 'অতীত', Observed: 'পর্যবেক্ষিত', Likely: 'সম্ভাব্য', Possible: 'সম্ভব', Unlikely: 'অসম্ভাব্য' },
+};
+
+export function alertEnumLabel(language: string, value: string): string {
+  return ALERT_ENUM_LABELS[language]?.[value] || value;
+}
