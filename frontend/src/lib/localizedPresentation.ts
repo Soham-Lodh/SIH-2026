@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { apiUrl } from './api';
+import { translateBatch } from './googleTranslate';
 
 export interface PresentationEntry { id: string; text: string | null | undefined }
 type CachedPresentation = { original: string; text: string; translated: boolean };
@@ -34,22 +34,16 @@ export function useLocalizedPresentation(language: string, entries: Presentation
     if (missing.length === 0) return;
 
     let cancelled = false;
-    void fetch(apiUrl('/api/localize/presentation'), {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ language, entries: missing }),
-    })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error('Presentation translation unavailable')))
-      .then((payload) => {
+    void translateBatch(missing.map((entry) => entry.text!.trim()), language)
+      .then((values) => {
         if (cancelled) return;
         const incoming: Record<string, CachedPresentation> = {};
-        for (const item of payload.items || []) {
-          if (!item?.id || typeof item.text !== 'string') continue;
-          const entry = missing.find((candidate) => candidate.id === item.id);
-          if (!entry) continue;
-          const value = { original: item.original || entry.text || '', text: item.text, translated: Boolean(item.translated) };
+        missing.forEach((entry, index) => {
+          const text = values[index] || entry.text || '';
+          const value = { original: entry.text || '', text, translated: text !== entry.text };
           cache.set(cacheKey(language, entry), value);
-          incoming[item.id] = value;
-        }
+          incoming[entry.id] = value;
+        });
         setResolved((current) => ({ ...current, ...incoming }));
       })
       .catch(() => { /* Canonical source text remains visible on a translation failure. */ });

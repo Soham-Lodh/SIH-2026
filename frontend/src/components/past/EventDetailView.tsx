@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { EvidenceBundle, CitedSource } from '../../types/disaster';
 import {
   ArrowLeft,
@@ -23,6 +23,8 @@ import {
   VolumeX,
 } from 'lucide-react';
 import { getTranslation } from '../../types/language';
+import { useTranslateBatch } from '../../hooks/useTranslateBatch';
+import { translateEvidenceBundle } from '../../lib/googleTranslate';
 
 interface EventDetailViewProps {
   bundle: EvidenceBundle;
@@ -33,7 +35,7 @@ interface EventDetailViewProps {
 }
 
 export const EventDetailView: React.FC<EventDetailViewProps> = ({
-  bundle,
+  bundle: sourceBundle,
   onBack,
   onOpenChatWithEvent,
   onPlayTTS,
@@ -43,6 +45,40 @@ export const EventDetailView: React.FC<EventDetailViewProps> = ({
   const [isSpeaking, setIsSpeaking] = useState(false);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const t = getTranslation(language);
+  const translatableFields = useMemo(() => ({
+    eventName: sourceBundle.eventName,
+    location: sourceBundle.location,
+    state: sourceBundle.state,
+    whatHappened: sourceBundle.whatHappened,
+    affectedAreas: sourceBundle.affectedAreas,
+    humanImpact: sourceBundle.humanImpact,
+    infrastructureDamage: sourceBundle.infrastructureDamage,
+    economicImpact: sourceBundle.economicImpact,
+    governmentResponse: sourceBundle.governmentResponse,
+    rescueRelief: sourceBundle.rescueRelief,
+    recovery: sourceBundle.recovery,
+    sourceAssessment: sourceBundle.sourceAssessment,
+    reportedCasualties: sourceBundle.reportedCasualties,
+    reportedDamage: sourceBundle.reportedDamage,
+  }), [sourceBundle]);
+  const { result: translatedFields } = useTranslateBatch(translatableFields, language);
+  const [translatedBundle, setTranslatedBundle] = useState<EvidenceBundle | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (language === 'en') {
+      setTranslatedBundle(sourceBundle);
+      return () => { cancelled = true; };
+    }
+    void translateEvidenceBundle(sourceBundle, language).then((value) => {
+      if (!cancelled) setTranslatedBundle(value);
+    });
+    return () => { cancelled = true; };
+  }, [sourceBundle, language]);
+
+  const bundle: EvidenceBundle = translatedBundle
+    ? { ...translatedBundle, ...(translatedFields || {}) }
+    : { ...sourceBundle, ...(translatedFields || {}) };
 
   const isMeaningfulText = (text?: string | null) => {
     if (!text) return false;
@@ -127,7 +163,10 @@ export const EventDetailView: React.FC<EventDetailViewProps> = ({
   };
 
   const hasSourceAssessment = isMeaningfulText(bundle.sourceAssessment);
-  const hasConflicts = Boolean(bundle.conflictingReports && bundle.conflictingReports.length > 0);
+  const meaningfulConflicts = (bundle.conflictingReports || []).filter((conflict) =>
+    isMeaningfulText(conflict.topic) && isMeaningfulText(conflict.details),
+  );
+  const hasConflicts = meaningfulConflicts.length > 0;
 
   // Render text with clickable citation badges [S1], [S2]
   const renderWithCitations = (text: string) => {
@@ -199,7 +238,7 @@ export const EventDetailView: React.FC<EventDetailViewProps> = ({
 
           <button
             type="button"
-            onClick={() => onOpenChatWithEvent(bundle)}
+          onClick={() => onOpenChatWithEvent(sourceBundle)}
             className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-sm transition-all"
           >
             <Sparkles className="w-4 h-4" />
@@ -377,7 +416,7 @@ export const EventDetailView: React.FC<EventDetailViewProps> = ({
             {hasConflicts && (
               <div className="space-y-2 pt-2 border-t border-slate-100">
                 <h5 className="font-bold text-xs text-amber-800">Reconciled Conflicting Dispatches:</h5>
-                {bundle.conflictingReports.map((conflict, idx) => (
+                {meaningfulConflicts.map((conflict, idx) => (
                   <div key={idx} className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1 text-xs">
                     <span className="font-bold text-slate-900">{conflict.topic}</span>
                     <p className="text-slate-600">{renderWithCitations(conflict.details)}</p>

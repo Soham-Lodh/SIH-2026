@@ -270,14 +270,31 @@ async function groqChatCompletion(params: {
   throw lastError || new Error('Groq chat completion failed.');
 }
 
-export async function transcribeAudio(audioBase64: string, mimeType: string = 'audio/webm'): Promise<string> {
+function mimeToExt(mime: string): string {
+  const base = mime.split(';')[0].trim().toLowerCase();
+  const map: Record<string, string> = {
+    'audio/webm': 'webm',
+    'audio/mp4': 'mp4',
+    'audio/mpeg': 'mp3',
+    'audio/ogg': 'ogg',
+    'audio/wav': 'wav',
+    'audio/x-wav': 'wav',
+    'audio/flac': 'flac',
+    'audio/m4a': 'm4a',
+  };
+  return map[base] || 'webm';
+}
+
+export async function transcribeAudio(audio: Buffer | string, mimeType: string = 'audio/webm'): Promise<string> {
   const apiKey = getGroqKey('stt');
   const baseUrl = getGroqBaseUrl();
   const sttModel = getGroqSttModel();
-  const base64Data = audioBase64.replace(/^data:[^;]+;base64,/, '');
-  const audioBuffer = Buffer.from(base64Data, 'base64');
+  const audioBuffer = Buffer.isBuffer(audio)
+    ? audio
+    : Buffer.from(audio.replace(/^data:[^;]+;base64,/, ''), 'base64');
   const form = new FormData();
-  form.append('file', new Blob([audioBuffer], { type: mimeType.split(';')[0] || 'audio/webm' }), 'audio.webm');
+  const normalizedMime = mimeType.split(';')[0] || 'audio/webm';
+  form.append('file', new Blob([audioBuffer], { type: normalizedMime }), `audio.${mimeToExt(mimeType)}`);
   form.append('model', sttModel);
   form.append('response_format', 'json');
   form.append('temperature', '0');
@@ -587,17 +604,22 @@ function buildArchiveQueryPool(options?: {
     state && decade ? `${state} ${decade}` : '',
   ].filter(Boolean);
 
+  const hints = decadeYearHints[decade] || ['2024', '2025', '2026'];
+  const decorateQuery = (query: string) => {
+    const parts = [query, category, state, decade ? hints.slice(0, 3).join(' ') : '']
+      .filter(Boolean)
+      .join(' ');
+    return `${parts} India`.replace(/\s+/g, ' ').trim();
+  };
   const targeted = searchRoots.flatMap((root) => {
-    const hints = decadeYearHints[decade] || ['2024', '2025', '2026'];
-    return [
-      `${root} India`,
-      `${root} flood India`,
-      `${root} disaster India`,
-      ...hints.slice(0, 3).map((year) => `${root} ${year} India`),
-    ];
+    const variants = [root, `${root} flood`, `${root} disaster`, ...hints.map((year) => `${root} ${year}`)];
+    return variants.map(decorateQuery);
   });
 
-  const combined = [...targeted, ...RECENT_ARCHIVE_SEARCHES];
+  const combined = [
+    ...targeted,
+    ...RECENT_ARCHIVE_SEARCHES.map(decorateQuery),
+  ];
   const deduped: string[] = [];
   const seen = new Set<string>();
 
@@ -606,7 +628,7 @@ function buildArchiveQueryPool(options?: {
     if (!key || seen.has(key)) continue;
     seen.add(key);
     deduped.push(query);
-    if (deduped.length >= limit + 10) break;
+    if (deduped.length >= Math.max(limit * 5, 100)) break;
   }
 
   return deduped;
@@ -727,7 +749,24 @@ export async function buildRecentIndiaArchive(limit: number = 30, options?: {
   const seen = new Set<string>();
   const concurrency = 4;
 
-  for (let i = 0; i < queries.length; i += concurrency) {
+  const matchesFilters = (item: HistoricalDisasterItem) => {
+    if (options?.categoryFilter && options.categoryFilter !== 'all') {
+      const category = options.categoryFilter.toLowerCase();
+      const matchesCategory = item.disasterType.toLowerCase().includes(category) ||
+        (category === 'landslide' && item.disasterType.toLowerCase().includes('avalanche'));
+      if (!matchesCategory) return false;
+    }
+    if (options?.stateFilter && options.stateFilter !== 'All States') {
+      const state = options.stateFilter.toLowerCase();
+      if (!item.state.toLowerCase().includes(state) && !item.location.toLowerCase().includes(state)) return false;
+    }
+    if (options?.decadeFilter && options.decadeFilter !== 'all' && item.decade !== options.decadeFilter) {
+      return false;
+    }
+    return true;
+  };
+
+  for (let i = 0; i < queries.length && archive.length < limit; i += concurrency) {
     const batch = queries.slice(i, i + concurrency);
     const batchResults = await Promise.allSettled(
       batch.map((query, offset) => buildArchiveEvidenceBundle(query, i + offset))
@@ -736,6 +775,7 @@ export async function buildRecentIndiaArchive(limit: number = 30, options?: {
     for (const result of batchResults) {
       if (result.status !== 'fulfilled' || !result.value) continue;
       const item = result.value;
+      if (!matchesFilters(item)) continue;
       const dedupeKey = `${item.eventName.toLowerCase()}|${item.state.toLowerCase()}|${item.dateRange.toLowerCase()}`;
       if (seen.has(dedupeKey)) continue;
       seen.add(dedupeKey);
@@ -746,23 +786,7 @@ export async function buildRecentIndiaArchive(limit: number = 30, options?: {
     if (archive.length >= limit) break;
   }
 
-  let sorted = archive.sort((a, b) => b.year - a.year);
-
-  if (options?.categoryFilter && options.categoryFilter !== 'all') {
-    const category = options.categoryFilter.toLowerCase();
-    sorted = sorted.filter((item) => item.disasterType.toLowerCase().includes(category));
-  }
-
-  if (options?.stateFilter && options.stateFilter !== 'All States') {
-    const state = options.stateFilter.toLowerCase();
-    sorted = sorted.filter((item) => item.state.toLowerCase().includes(state) || item.location.toLowerCase().includes(state));
-  }
-
-  if (options?.decadeFilter && options.decadeFilter !== 'all') {
-    sorted = sorted.filter((item) => item.decade === options.decadeFilter);
-  }
-
-  sorted = sorted.slice(0, limit);
+  const sorted = archive.sort((a, b) => b.year - a.year).slice(0, limit);
 
   recentArchiveCache.set(cacheKey, {
     expiresAt: Date.now() + RECENT_ARCHIVE_CACHE_TTL_MS,

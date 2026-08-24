@@ -7,6 +7,8 @@ import { EventCardSkeleton } from '../common/Skeletons';
 import { AudioRecorderButton } from '../common/AudioRecorderButton';
 import { HistoricalDisasterItem } from '../../data/historicalDisasters';
 import { apiUrl } from '../../lib/api';
+import { translateText } from '../../lib/googleTranslate';
+import { useTranslateContent } from '../../hooks/useTranslateContent';
 import {
   Search,
   Sparkles,
@@ -47,6 +49,11 @@ interface PastWorkspaceProps {
 
 export type SortOption = 'oldest' | 'recent' | 'casualties' | 'sources' | 'alphabetical';
 export type DecadeFilter = 'all' | '1990s' | '2000s' | '2010s' | '2020s';
+
+const TranslatedText: React.FC<{ text: string; language: string }> = ({ text, language }) => {
+  const { translated } = useTranslateContent(text, language);
+  return <>{translated}</>;
+};
 
 const CATEGORIES: { label: string; value: string; icon: React.FC<{ className?: string }> }[] = [
   { label: 'All Hazards', value: 'all', icon: Layers },
@@ -127,63 +134,23 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
       setArchiveError(null);
 
       try {
-        if (activeLiveQueryRef.current.trim()) {
-          const res = await fetch(apiUrl('/api/past/search'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              query: activeLiveQueryRef.current.trim(),
-              category: selectedCategory === 'all' ? undefined : selectedCategory,
-              state: selectedState === 'All States' ? undefined : selectedState,
-            }),
-          });
+        const params = new URLSearchParams();
+        if (selectedCategory !== 'all') params.set('category', selectedCategory);
+        if (selectedState !== 'All States') params.set('state', selectedState);
+        if (selectedDecade !== 'all') params.set('decade', selectedDecade);
 
-          const data = await res.json().catch(() => null);
-          if (!res.ok) {
-            throw new Error(data?.details || data?.error || 'Failed to retrieve live dossier');
-          }
+        const archiveUrl = params.toString() ? `/api/past/archive?${params.toString()}` : '/api/past/archive';
+        const res = await fetch(apiUrl(archiveUrl));
+        const data = await res.json().catch(() => null);
 
-          if (cancelled) return;
-
-          if (data?.bundle) {
-            const year = deriveYear(data.bundle);
-            const decade: DecadeFilter =
-              year < 2000 ? '1990s' : year < 2010 ? '2000s' : year < 2020 ? '2010s' : '2020s';
-
-            const enriched: HistoricalDisasterItem = {
-              ...data.bundle,
-              year,
-              numericCasualties: deriveCasualtyScore(data.bundle),
-              decade,
-            };
-
-            setEvidenceBundles((prev) => {
-              const filtered = prev.filter((item) => item.eventName.toLowerCase() !== enriched.eventName.toLowerCase());
-              return [enriched, ...filtered];
-            });
-            setSelectedBundle(enriched);
-          } else {
-            setSearchError('No matching sources were found for this query. Try a broader disaster name, district, or state.');
-          }
-        } else {
-          const params = new URLSearchParams();
-          if (selectedCategory !== 'all') params.set('category', selectedCategory);
-          if (selectedState !== 'All States') params.set('state', selectedState);
-          if (selectedDecade !== 'all') params.set('decade', selectedDecade);
-
-          const archiveUrl = params.toString() ? `/api/past/archive?${params.toString()}` : '/api/past/archive';
-          const res = await fetch(apiUrl(archiveUrl));
-          const data = await res.json().catch(() => null);
-
-          if (!res.ok) {
-            throw new Error(data?.details || data?.error || 'Failed to load recent archive');
-          }
-
-          const items = Array.isArray(data?.items) ? data.items : [];
-          if (cancelled) return;
-
-          setEvidenceBundles(items);
+        if (!res.ok) {
+          throw new Error(data?.details || data?.error || 'Failed to load recent archive');
         }
+
+        const items = Array.isArray(data?.items) ? data.items : [];
+        if (cancelled) return;
+
+        setEvidenceBundles(items);
       } catch (error) {
         if (!cancelled) {
           setArchiveError((error as Error).message || 'Failed to load recent archive');
@@ -218,13 +185,15 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
     activeLiveQueryRef.current = q;
 
     try {
+      const englishQuery = language === 'en' ? q : await translateText(q, 'en');
       const res = await fetch(apiUrl('/api/past/search'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          query: q,
+          query: englishQuery,
           category: selectedCategory === 'all' ? undefined : selectedCategory,
           state: selectedState === 'All States' ? undefined : selectedState,
+          targetLanguage: 'en',
         }),
       });
 
@@ -411,7 +380,7 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
               <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold font-mono uppercase border bg-slate-100 text-slate-700 border-slate-200">
               {hazardLabel(language, bundle.disasterType)}
               </span>
-              <span className="text-xs text-slate-500 font-medium">{bundle.state}</span>
+              <span className="text-xs text-slate-500 font-medium"><TranslatedText text={bundle.state} language={language} /></span>
             </div>
 
             <span className="text-[11px] font-mono font-medium px-2 py-0.5 rounded-full bg-slate-50 text-slate-600 border border-slate-200 shrink-0">
@@ -421,16 +390,16 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
 
           <div>
             <h4 className="font-bold text-base sm:text-lg text-slate-900 group-hover:text-indigo-600 transition-colors leading-snug">
-              {bundle.eventName}
+              <TranslatedText text={bundle.eventName} language={language} />
             </h4>
             <div className="flex items-center gap-1 text-xs text-slate-500 mt-1">
               <MapPin className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
               <span>
-                {bundle.location}, {bundle.state}
+                <TranslatedText text={`${bundle.location}, ${bundle.state}`} language={language} />
               </span>
               <span className="text-slate-300">•</span>
               <Calendar className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-              <span>{bundle.dateRange}</span>
+              <TranslatedText text={bundle.dateRange} language={language} />
             </div>
           </div>
         </div>
@@ -442,7 +411,7 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
               <span>{translate(language, 'history.casualties')}</span>
             </span>
             <p className="text-slate-800 line-clamp-2 leading-relaxed text-xs font-medium">
-              {bundle.reportedCasualties}
+              <TranslatedText text={bundle.reportedCasualties} language={language} />
             </p>
           </div>
 
@@ -452,12 +421,14 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
               <span>{translate(language, 'history.damage')}</span>
             </span>
             <p className="text-slate-800 line-clamp-2 leading-relaxed text-xs font-medium">
-              {bundle.reportedDamage}
+              <TranslatedText text={bundle.reportedDamage} language={language} />
             </p>
           </div>
         </div>
 
-        <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed">{bundle.whatHappened}</p>
+        <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed">
+          <TranslatedText text={bundle.whatHappened} language={language} />
+        </p>
 
         <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-slate-100">
           <div className="flex items-center gap-2">

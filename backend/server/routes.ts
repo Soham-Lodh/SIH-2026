@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import multer from 'multer';
 import { getSachetAlerts } from './sachet';
 import { searchGoogleNews } from './googleNews';
 import {
@@ -16,6 +17,7 @@ import { normalizeLang, resolveLocalizedPresentation, translateText } from './li
 import type { SachetAlert } from './types/disaster';
 
 const router = Router();
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
 warmRecentIndiaArchive(30);
 
 // In-memory request limiter / counter for API cost safety (Section 14)
@@ -72,7 +74,7 @@ setInterval(() => {
  * POST /api/transcribe
  * Transcribes audio recordings from microphone using Groq Whisper.
  */
-router.post('/transcribe', async (req: Request, res: Response) => {
+router.post('/transcribe', upload.single('file'), async (req: Request, res: Response) => {
   try {
     if (!isGroqConfigured()) {
       return res.status(503).json({
@@ -81,13 +83,14 @@ router.post('/transcribe', async (req: Request, res: Response) => {
       });
     }
 
-    const { audioBase64, mimeType } = req.body;
-    if (!audioBase64) {
+    const audioBase64 = typeof req.body.audioBase64 === 'string' ? req.body.audioBase64 : undefined;
+    const mimeType = typeof req.body.mimeType === 'string' ? req.body.mimeType : req.file?.mimetype;
+    if (!req.file?.buffer && !audioBase64) {
       return res.status(400).json({ error: 'Audio data is required for transcription' });
     }
 
     const { targetLanguage } = req.body;
-    const text = await transcribeAudio(audioBase64, mimeType || 'audio/webm');
+    const text = await transcribeAudio(req.file?.buffer || audioBase64!, mimeType || 'audio/webm');
     const localized = normalizeLang(targetLanguage) === 'en' ? text : await translateText(text, normalizeLang(targetLanguage));
     res.json({ text: localized, success: true });
   } catch (error) {

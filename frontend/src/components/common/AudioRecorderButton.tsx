@@ -3,6 +3,16 @@ import { Mic, Square, Loader2, AlertCircle } from 'lucide-react';
 import { apiUrl } from '../../lib/api';
 import { translate } from '../../types/language';
 
+function mimeToExt(mime: string): string {
+  const base = mime.split(';')[0].trim().toLowerCase();
+  const map: Record<string, string> = {
+    'audio/webm': 'webm', 'audio/mp4': 'mp4', 'audio/mpeg': 'mp3',
+    'audio/ogg': 'ogg', 'audio/wav': 'wav', 'audio/x-wav': 'wav',
+    'audio/flac': 'flac', 'audio/m4a': 'm4a',
+  };
+  return map[base] || 'webm';
+}
+
 interface AudioRecorderButtonProps {
   onTranscribed: (text: string) => void;
   language?: string;
@@ -96,42 +106,30 @@ export const AudioRecorderButton: React.FC<AudioRecorderButtonProps> = ({
 
   const handleTranscribe = async (blob: Blob, mimeType: string) => {
     try {
-      const reader = new FileReader();
-      reader.readAsDataURL(blob);
-      reader.onloadend = async () => {
-        const base64Data = (reader.result as string) || '';
-        try {
-          const res = await fetch(apiUrl('/api/transcribe'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              audioBase64: base64Data,
-              mimeType,
-              targetLanguage: targetLanguage || language,
-            }),
-          });
+      const formData = new FormData();
+      formData.append('file', blob, `audio.${mimeToExt(mimeType)}`);
+      formData.append('mimeType', mimeType);
+      formData.append('targetLanguage', targetLanguage || language);
+      const res = await fetch(apiUrl('/api/transcribe'), {
+        method: 'POST',
+        body: formData,
+      });
 
-          if (!res.ok) {
-            throw new Error(`Server returned ${res.status}`);
-          }
+      if (!res.ok) {
+        throw new Error(`Server returned ${res.status}`);
+      }
 
-          const data = await res.json();
-          if (data.text) {
-            onTranscribed(data.text);
-          } else {
-            setErrorMessage(translate(language, 'voice.noSpeech'));
-          }
-        } catch (serverErr) {
-          console.error('Transcription API error:', serverErr);
-          setErrorMessage(translate(language, 'voice.transcriptionError'));
-        } finally {
-          setIsTranscribing(false);
-        }
-      };
+      const data = await res.json();
+      if (data.text) {
+        onTranscribed(data.text);
+      } else {
+        setErrorMessage(translate(language, 'voice.noSpeech'));
+      }
     } catch (err) {
-      console.error('Error processing audio data:', err);
+      console.error('Transcription API error:', err);
+      setErrorMessage(translate(language, 'voice.transcriptionError'));
+    } finally {
       setIsTranscribing(false);
-      setErrorMessage(translate(language, 'voice.processingError'));
     }
   };
 

@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { EvidenceBundle } from '../../types/disaster';
+import { ComparisonMatrix, EvidenceBundle } from '../../types/disaster';
 import { X, Scale, Sparkles, Check, ExternalLink, ShieldAlert, ArrowRight } from 'lucide-react';
 import { getTranslation } from '../../types/language';
 import { apiUrl } from '../../lib/api';
+import { translateComparison } from '../../lib/googleTranslate';
 
 interface CompareModalProps {
   bundles: EvidenceBundle[];
@@ -15,7 +16,7 @@ export const CompareModal: React.FC<CompareModalProps> = ({
   onClose,
   language,
 }) => {
-  const [comparisonData, setComparisonData] = useState<any | null>(null);
+  const [comparisonData, setComparisonData] = useState<ComparisonMatrix | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const t = getTranslation(language);
 
@@ -26,12 +27,15 @@ export const CompareModal: React.FC<CompareModalProps> = ({
     fetch(apiUrl('/api/past/compare'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ bundles }),
+      body: JSON.stringify({ bundles, targetLanguage: 'en' }),
     })
       .then((res) => res.json())
       .then((data) => {
         if (isMounted) {
-          setComparisonData(data);
+          void translateComparison(data as ComparisonMatrix, language).then((localized) => {
+            if (!isMounted) return;
+            setComparisonData(localized);
+          });
           setIsLoading(false);
         }
       })
@@ -43,7 +47,7 @@ export const CompareModal: React.FC<CompareModalProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [bundles]);
+  }, [bundles, language]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-900/50 backdrop-blur-md animate-in fade-in duration-150">
@@ -114,13 +118,13 @@ export const CompareModal: React.FC<CompareModalProps> = ({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 bg-white">
-                    {comparisonData.comparisonPoints?.map((point: any, idx: number) => (
+                    {comparisonData.comparisonPoints?.map((point, idx) => (
                       <tr key={idx} className="hover:bg-slate-50/60">
                         <td className="p-3.5 font-bold text-slate-800 bg-slate-50/50 align-top">
                           <div>{point.label}</div>
                           <span className="text-[10px] font-mono text-indigo-600 font-medium">{point.category}</span>
                         </td>
-                        {point.values?.map((v: any, vIdx: number) => (
+                        {point.values?.map((v, vIdx) => (
                           <td key={vIdx} className="p-3.5 text-slate-700 align-top leading-relaxed">
                             {v.value}
                             {v.citations?.length > 0 && (

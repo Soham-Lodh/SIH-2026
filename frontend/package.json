@@ -10,9 +10,12 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@assistant-ui/react": "^0.15.16",
+    "@assistant-ui/react-markdown": "^0.14.12",
     "@tailwindcss/vite": "^4.1.14",
     "@types/leaflet": "^1.9.22",
     "@vitejs/plugin-react": "^5.0.4",
+    "ai": "^7.0.77",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
@@ -21,10 +24,10 @@
     "react-markdown": "^10.1.0"
   },
   "devDependencies": {
-    "autoprefixer": "^10.4.21",
     "@types/node": "^22.14.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "autoprefixer": "^10.4.21",
     "tailwindcss": "^4.1.14",
     "typescript": "~5.8.2",
     "vite": "^6.2.3"
