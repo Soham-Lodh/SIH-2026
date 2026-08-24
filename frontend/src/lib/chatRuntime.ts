@@ -8,6 +8,7 @@ export interface ChatRuntimeOptions {
   historyRef?: { current: Array<{ role: 'user' | 'assistant'; content: string }> };
   onMessagesChange?: (messages: ThreadMessageLike[]) => void;
   onRunningChange?: (isRunning: boolean) => void;
+  inputLanguage?: string;
 }
 
 function messageText(message: AppendMessage): string {
@@ -58,14 +59,16 @@ export function createChatRuntime(
       adapter.isRunning = true;
 
       try {
-        const englishMessage = language === 'en' ? userText : await translateText(userText, 'en');
+        const inputLanguage = options.inputLanguage || language;
+        const responseLanguage = options.inputLanguage || language;
+        const englishMessage = inputLanguage === 'en' ? userText : await translateText(userText, 'en', inputLanguage);
         const response = await fetch(apiUrl('/api/past/chat'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             message: englishMessage,
             history: englishHistoryRef.current,
-            targetLanguage: 'en',
+            targetLanguage: responseLanguage,
             associatedBundle,
           }),
         });

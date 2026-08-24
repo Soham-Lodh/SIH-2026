@@ -4,6 +4,7 @@ import { Navbar } from './components/Navbar';
 import { PresentWorkspace } from './components/present/PresentWorkspace';
 import { PastWorkspace } from './components/past/PastWorkspace';
 import { AIAssistantDrawer } from './components/past/AIAssistantDrawer';
+import { useAutoTranslatePage } from './hooks/useAutoTranslatePage';
 
 export function App() {
   const [currentTab, setCurrentTab] = useState<'present' | 'past'>('present');
@@ -15,6 +16,8 @@ export function App() {
   const [isVoiceAssistantOpen, setIsVoiceAssistantOpen] = useState<boolean>(false);
   const currentPath = typeof window !== 'undefined' ? window.location.pathname : '/';
   const isKnownPath = currentPath === '/' || currentPath === '/present' || currentPath === '/past';
+
+  useAutoTranslatePage(currentLanguage);
 
   useEffect(() => {
     window.localStorage.setItem('disaster-intelligence.language', currentLanguage);

@@ -36,6 +36,7 @@ import {
   FileSpreadsheet,
   Printer,
   ChevronDown,
+  Filter,
 } from 'lucide-react';
 import { getTranslation, hazardLabel, translate } from '../../types/language';
 
@@ -95,8 +96,14 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedState, setSelectedState] = useState<string>('All States');
   const [selectedDecade, setSelectedDecade] = useState<DecadeFilter>('all');
+  const [appliedFilters, setAppliedFilters] = useState({
+    category: 'all',
+    state: 'All States',
+    decade: 'all' as DecadeFilter,
+  });
   const [sortOption, setSortOption] = useState<SortOption>('recent');
   const [isArchiveLoading, setIsArchiveLoading] = useState(true);
+  const [isApplyingFilter, setIsApplyingFilter] = useState(false);
   const [isSearchingLive, setIsSearchingLive] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [archiveError, setArchiveError] = useState<string | null>(null);
@@ -134,13 +141,7 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
       setArchiveError(null);
 
       try {
-        const params = new URLSearchParams();
-        if (selectedCategory !== 'all') params.set('category', selectedCategory);
-        if (selectedState !== 'All States') params.set('state', selectedState);
-        if (selectedDecade !== 'all') params.set('decade', selectedDecade);
-
-        const archiveUrl = params.toString() ? `/api/past/archive?${params.toString()}` : '/api/past/archive';
-        const res = await fetch(apiUrl(archiveUrl));
+        const res = await fetch(apiUrl('/api/past/archive'));
         const data = await res.json().catch(() => null);
 
         if (!res.ok) {
@@ -167,14 +168,74 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
     return () => {
       cancelled = true;
     };
-  // Do not reload archive data for a UI-only locale switch.
-  }, [selectedCategory, selectedState, selectedDecade]);
+  }, []);
 
-  useEffect(() => {
-    if (selectedBundle) {
-      setSelectedBundle(null);
+  const handleApplyFilters = async () => {
+    setIsApplyingFilter(true);
+    setIsArchiveLoading(true);
+    setArchiveError(null);
+    setSearchError(null);
+    setSelectedBundle(null);
+    setSearchQuery('');
+    activeLiveQueryRef.current = '';
+
+    const nextFilters = {
+      category: selectedCategory,
+      state: selectedState,
+      decade: selectedDecade,
+    };
+
+    try {
+      const res = await fetch(apiUrl('/api/past/filter-search'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...nextFilters,
+          language,
+          limit: 100,
+        }),
+      });
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        throw new Error(data?.details || data?.error || 'Failed to apply archive filters');
+      }
+
+      setEvidenceBundles(Array.isArray(data?.items) ? data.items : []);
+      setAppliedFilters(nextFilters);
+    } catch (error) {
+      setArchiveError((error as Error).message || 'Failed to apply archive filters');
+    } finally {
+      setIsApplyingFilter(false);
+      setIsArchiveLoading(false);
     }
-  }, [selectedCategory, selectedState, selectedDecade]);
+  };
+
+  const handleResetFilters = async () => {
+    setSearchQuery('');
+    activeLiveQueryRef.current = '';
+    setSelectedCategory('all');
+    setSelectedState('All States');
+    setSelectedDecade('all');
+    setAppliedFilters({ category: 'all', state: 'All States', decade: 'all' });
+    setSortOption('recent');
+    setSelectedBundle(null);
+    setArchiveError(null);
+    setIsArchiveLoading(true);
+
+    try {
+      const res = await fetch(apiUrl('/api/past/archive'));
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(data?.details || data?.error || 'Failed to reset archive filters');
+      }
+      setEvidenceBundles(Array.isArray(data?.items) ? data.items : []);
+    } catch (error) {
+      setArchiveError((error as Error).message || 'Failed to reset archive filters');
+    } finally {
+      setIsArchiveLoading(false);
+    }
+  };
 
   const handleLiveQuerySearch = async (query: string) => {
     const q = query.trim();
@@ -185,14 +246,14 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
     activeLiveQueryRef.current = q;
 
     try {
-      const englishQuery = language === 'en' ? q : await translateText(q, 'en');
+      const englishQuery = language === 'en' ? q : await translateText(q, 'en', language);
       const res = await fetch(apiUrl('/api/past/search'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           query: englishQuery,
-          category: selectedCategory === 'all' ? undefined : selectedCategory,
-          state: selectedState === 'All States' ? undefined : selectedState,
+          category: appliedFilters.category === 'all' ? undefined : appliedFilters.category,
+          state: appliedFilters.state === 'All States' ? undefined : appliedFilters.state,
           targetLanguage: 'en',
         }),
       });
@@ -298,23 +359,6 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
       );
     }
 
-    if (selectedCategory !== 'all') {
-      result = result.filter((event) => {
-        if (selectedCategory === 'Landslide') {
-          return event.disasterType === 'Landslide' || event.disasterType === 'Avalanche';
-        }
-        return event.disasterType.toLowerCase().includes(selectedCategory.toLowerCase());
-      });
-    }
-
-    if (selectedState !== 'All States') {
-      result = result.filter((event) => event.state.toLowerCase().includes(selectedState.toLowerCase()));
-    }
-
-    if (selectedDecade !== 'all') {
-      result = result.filter((event) => event.decade === selectedDecade);
-    }
-
     result.sort((a, b) => {
       if (sortOption === 'oldest') return a.year - b.year;
       if (sortOption === 'recent') return b.year - a.year;
@@ -325,7 +369,7 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
     });
 
     return result;
-  }, [evidenceBundles, searchQuery, selectedCategory, selectedState, selectedDecade, sortOption]);
+  }, [evidenceBundles, searchQuery, sortOption]);
 
   const toggleCompare = (bundle: EvidenceBundle) => {
     const exists = compareList.some((item) => item.id === bundle.id);
@@ -715,6 +759,28 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
             );
           })}
         </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3">
+          <div className="text-xs text-slate-500">
+            {selectedCategory !== appliedFilters.category ||
+            selectedState !== appliedFilters.state ||
+            selectedDecade !== appliedFilters.decade ? (
+              <span>Filter selections are ready. Apply them to run a fresh evidence search.</span>
+            ) : (
+              <span>Results reflect the last applied filter set.</span>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => void handleApplyFilters()}
+            disabled={isApplyingFilter || isArchiveLoading}
+            className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-xs flex items-center gap-2 shadow-sm shadow-indigo-100 transition-colors"
+            aria-label="Apply Filter"
+          >
+            <Filter className={`w-4 h-4 ${isApplyingFilter ? 'animate-pulse' : ''}`} />
+            <span>{isApplyingFilter ? 'Applying Filter...' : 'Apply Filter'}</span>
+          </button>
+        </div>
       </div>
 
       {archiveError && !evidenceBundles.length && !isArchiveLoading && (
@@ -732,17 +798,11 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
           </span>
         </div>
 
-        {(searchQuery || selectedCategory !== 'all' || selectedState !== 'All States' || selectedDecade !== 'all') && (
+        {(searchQuery || selectedCategory !== 'all' || selectedState !== 'All States' || selectedDecade !== 'all' ||
+          appliedFilters.category !== 'all' || appliedFilters.state !== 'All States' || appliedFilters.decade !== 'all') && (
           <button
             type="button"
-              onClick={() => {
-                setSearchQuery('');
-                activeLiveQueryRef.current = '';
-                setSelectedCategory('all');
-                setSelectedState('All States');
-                setSelectedDecade('all');
-                setSortOption('oldest');
-              }}
+            onClick={() => void handleResetFilters()}
             className="text-indigo-600 hover:text-indigo-800 font-semibold underline"
           >
             Reset All Filters
@@ -757,9 +817,19 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
           <div className="mx-auto w-12 h-12 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600">
             <Sparkles className="w-5 h-5" />
           </div>
-          <h3 className="font-bold text-slate-900">No dossier yet</h3>
+          <h3 className="font-bold text-slate-900">
+            {archiveError
+              ? 'Live archive is temporarily unavailable'
+              : appliedFilters.category !== 'all' || appliedFilters.state !== 'All States' || appliedFilters.decade !== 'all'
+                ? 'No matching live records were found'
+                : 'No dossier yet'}
+          </h3>
           <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
-            Search any disaster event, district, or state and we will synthesize a single cited dossier and add it here.
+            {archiveError
+              ? 'The live source did not respond. Try Apply Filter again or use Search Evidence; no placeholder records were inserted.'
+              : appliedFilters.category !== 'all' || appliedFilters.state !== 'All States' || appliedFilters.decade !== 'all'
+                ? 'The live search returned no records for this combination. Broaden one filter and apply it again.'
+                : 'Search any disaster event, district, or state and we will synthesize a single cited dossier and add it here.'}
           </p>
         </div>
       ) : (

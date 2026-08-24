@@ -5,6 +5,7 @@ import { searchGoogleNews } from './googleNews';
 import {
   buildHistoricalEvidenceBundle,
   buildRecentIndiaArchive,
+  buildFilteredIndiaArchive,
   compareDisasterEvents,
   chatResearchAssistant,
   generateTTSAudio,
@@ -14,11 +15,12 @@ import {
   warmRecentIndiaArchive,
 } from './aiGateway';
 import { normalizeLang, resolveLocalizedPresentation, translateText } from './lib/translate';
+import { moderateChatInput } from './lib/moderation';
 import type { SachetAlert } from './types/disaster';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
-warmRecentIndiaArchive(30);
+warmRecentIndiaArchive(100);
 
 // In-memory request limiter / counter for API cost safety (Section 14)
 let globalSearchCounter = 0;
@@ -66,6 +68,25 @@ async function localizeAlert(alert: SachetAlert, targetLanguage?: string): Promi
   };
 }
 
+function canonicalizeFilterCategory(value?: string): string | undefined {
+  if (!value) return undefined;
+  const lower = value.toLowerCase();
+  if (/all\s+hazard|^all$/.test(lower)) return undefined;
+  if (lower.includes('cyclone')) return 'Cyclone';
+  if (lower.includes('flood') || lower.includes('deluge')) return 'Flood';
+  if (lower.includes('earthquake')) return 'Earthquake';
+  if (lower.includes('tsunami')) return 'Tsunami';
+  if (lower.includes('landslide') || lower.includes('avalanche')) return 'Landslide';
+  if (lower.includes('heat') || lower.includes('extreme weather')) return 'Heat Wave';
+  return value;
+}
+
+function canonicalizeFilterDecade(value?: string): string | undefined {
+  if (!value || /^all$/i.test(value.trim())) return undefined;
+  const match = value.match(/(19|20)\d{2}/);
+  return match ? `${match[0].slice(0, 3)}0s` : value;
+}
+
 setInterval(() => {
   globalSearchCounter = Math.max(0, globalSearchCounter - 20);
 }, 60000);
@@ -90,9 +111,11 @@ router.post('/transcribe', upload.single('file'), async (req: Request, res: Resp
     }
 
     const { targetLanguage } = req.body;
-    const text = await transcribeAudio(req.file?.buffer || audioBase64!, mimeType || 'audio/webm');
-    const localized = normalizeLang(targetLanguage) === 'en' ? text : await translateText(text, normalizeLang(targetLanguage));
-    res.json({ text: localized, success: true });
+    const transcription = await transcribeAudio(req.file?.buffer || audioBase64!, mimeType || 'audio/webm');
+    const detectedLanguage = normalizeLang(transcription.language || 'en');
+    // Keep the original transcript visible. The assistant decides the response
+    // language from Whisper's detected language after the user presses Send.
+    res.json({ text: transcription.text, detectedLanguage, sourceText: transcription.text, requestedLanguage: targetLanguage, success: true });
   } catch (error) {
     res.status(500).json({
       error: 'Audio transcription failed',
@@ -282,7 +305,7 @@ router.post('/past/search', async (req: Request, res: Response) => {
     }
     globalSearchCounter++;
 
-    const englishQuery = await translateText(query, 'en');
+    const englishQuery = await translateText(query, 'en', normalizeLang(targetLanguage));
     const bundle = await buildHistoricalEvidenceBundle(englishQuery, category, state);
     res.json({ bundle: await localizeEvidenceBundle(bundle, targetLanguage) });
   } catch (error) {
@@ -313,7 +336,7 @@ router.get('/past/archive', async (req: Request, res: Response) => {
     const stateFilter = typeof req.query.state === 'string' ? req.query.state : undefined;
     const decadeFilter = typeof req.query.decade === 'string' ? req.query.decade : undefined;
     const targetLanguage = normalizeLang(typeof req.query.lang === 'string' ? req.query.lang : undefined);
-    const items = await buildRecentIndiaArchive(30, { categoryFilter, stateFilter, decadeFilter });
+    const items = await buildRecentIndiaArchive(100, { categoryFilter, stateFilter, decadeFilter });
     const localizedItems = targetLanguage === 'en'
       ? items
       : await Promise.all(items.map((item) => localizeEvidenceBundle(item, targetLanguage)));
@@ -322,6 +345,66 @@ router.get('/past/archive', async (req: Request, res: Response) => {
   } catch (error) {
     res.status(500).json({
       error: 'Failed to build recent disaster archive',
+      details: (error as Error).message,
+    });
+  }
+});
+
+/**
+ * POST /api/past/filter-search
+ * Runs an explicit, filter-scoped live research pipeline. Unlike the archive
+ * route, this endpoint is only called after the user presses Apply Filter.
+ */
+router.post('/past/filter-search', async (req: Request, res: Response) => {
+  try {
+    if (globalSearchCounter >= GLOBAL_SEARCH_CEILING) {
+      return res.status(429).json({
+        error: 'Please allow results to load before applying another filter.',
+      });
+    }
+
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const sourceLanguage = normalizeLang(typeof body.language === 'string' ? body.language : undefined);
+    const translateFilter = async (value: unknown): Promise<string | undefined> => {
+      if (typeof value !== 'string' || !value.trim()) return undefined;
+      return (await translateText(value.trim(), 'en', sourceLanguage)).trim();
+    };
+
+    const [translatedCategory, translatedState, translatedDecade] = await Promise.all([
+      translateFilter(body.category),
+      translateFilter(body.state),
+      translateFilter(body.decade),
+    ]);
+
+    const categoryFilter = canonicalizeFilterCategory(translatedCategory);
+    const stateFilter = translatedState && !/^all\s+states?$/i.test(translatedState)
+      ? translatedState
+      : undefined;
+    const decadeFilter = canonicalizeFilterDecade(translatedDecade);
+    const requestedLimit = Number(body.limit);
+    const limit = Number.isFinite(requestedLimit) ? Math.min(Math.max(Math.floor(requestedLimit), 1), 100) : 100;
+
+    globalSearchCounter++;
+    const items = await buildFilteredIndiaArchive(limit, {
+      categoryFilter,
+      stateFilter,
+      decadeFilter,
+    });
+
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    res.json({
+      items,
+      count: items.length,
+      appliedFilters: {
+        category: categoryFilter || 'all',
+        state: stateFilter || 'All States',
+        decade: decadeFilter || 'all',
+      },
+      retrievedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: 'Failed to apply disaster filters',
       details: (error as Error).message,
     });
   }
@@ -382,6 +465,13 @@ router.post('/past/chat', async (req: Request, res: Response) => {
     const { message, history, targetLanguage, associatedBundle } = req.body;
     if (!message) {
       return res.status(400).json({ error: 'Message is required' });
+    }
+    const moderation = moderateChatInput(message);
+    if (!moderation.allowed) {
+      return res.status(422).json({
+        error: 'Please rephrase your message using respectful, disaster-related language.',
+        code: 'CHAT_INPUT_BLOCKED',
+      });
     }
 
     const chatResponse = await chatResearchAssistant({

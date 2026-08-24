@@ -46,13 +46,14 @@ export const UserLocationMap: React.FC<UserLocationMapProps> = ({
       });
 
       L.tileLayer(
-        'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
         {
-          attribution: '&copy; CARTO &copy; OSM',
-          subdomains: 'abcd',
+          attribution: 'Tiles &copy; Esri',
           maxZoom: 19,
         }
       ).addTo(map);
+
+      L.control.zoom({ position: 'topright' }).addTo(map);
 
       const layerGroup = L.layerGroup().addTo(map);
       layerGroupRef.current = layerGroup;

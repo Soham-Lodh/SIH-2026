@@ -329,12 +329,12 @@ export const IndiaLiveMap: React.FC<IndiaLiveMapProps> = ({
           zoomControl: false,
         });
 
-        // Crisp Voyager tiles for clean cartography
+        // Satellite imagery avoids disputed-label rendering while keeping every
+        // application marker and user interaction in Leaflet.
         L.tileLayer(
-          'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+          'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
           {
-            attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-            subdomains: 'abcd',
+            attribution: 'Tiles &copy; Esri',
             maxZoom: 19,
           }
         ).addTo(map);

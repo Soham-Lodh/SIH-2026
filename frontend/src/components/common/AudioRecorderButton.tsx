@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Mic, Square, Loader2, AlertCircle } from 'lucide-react';
 import { apiUrl } from '../../lib/api';
 import { translate } from '../../types/language';
@@ -14,7 +14,7 @@ function mimeToExt(mime: string): string {
 }
 
 interface AudioRecorderButtonProps {
-  onTranscribed: (text: string) => void;
+  onTranscribed: (text: string, metadata?: { detectedLanguage?: string }) => void;
   language?: string;
   targetLanguage?: string;
   className?: string;
@@ -34,10 +34,45 @@ export const AudioRecorderButton: React.FC<AudioRecorderButtonProps> = ({
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [waveform, setWaveform] = useState<number[]>(Array.from({ length: 24 }, () => 3));
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<number | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const animationRef = useRef<number | null>(null);
+
+  const stopWaveform = () => {
+    if (animationRef.current !== null) cancelAnimationFrame(animationRef.current);
+    animationRef.current = null;
+    audioContextRef.current?.close().catch(() => undefined);
+    audioContextRef.current = null;
+    analyserRef.current = null;
+    setWaveform(Array.from({ length: 24 }, () => 3));
+  };
+
+  const startWaveform = (stream: MediaStream) => {
+    try {
+      const context = new AudioContext();
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 64;
+      context.createMediaStreamSource(stream).connect(analyser);
+      audioContextRef.current = context;
+      analyserRef.current = analyser;
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      const draw = () => {
+        analyser.getByteFrequencyData(data);
+        setWaveform(Array.from({ length: 24 }, (_, index) => Math.max(3, Math.round((data[index % data.length] / 255) * 22))));
+        animationRef.current = requestAnimationFrame(draw);
+      };
+      draw();
+    } catch {
+      // Recording still works when an AudioContext is unavailable.
+    }
+  };
+
+  useEffect(() => () => stopWaveform(), []);
 
   const startRecording = async () => {
     setErrorMessage(null);
@@ -55,6 +90,7 @@ export const AudioRecorderButton: React.FC<AudioRecorderButtonProps> = ({
         : 'audio/wav';
 
       const recorder = new MediaRecorder(stream, { mimeType });
+      startWaveform(stream);
 
       recorder.ondataavailable = (event) => {
         if (event.data && event.data.size > 0) {
@@ -65,6 +101,7 @@ export const AudioRecorderButton: React.FC<AudioRecorderButtonProps> = ({
       recorder.onstop = async () => {
         // Stop all audio tracks to release microphone
         stream.getTracks().forEach((track) => track.stop());
+        stopWaveform();
 
         if (timerRef.current) {
           clearInterval(timerRef.current);
@@ -121,7 +158,7 @@ export const AudioRecorderButton: React.FC<AudioRecorderButtonProps> = ({
 
       const data = await res.json();
       if (data.text) {
-        onTranscribed(data.text);
+        onTranscribed(data.text, { detectedLanguage: data.detectedLanguage });
       } else {
         setErrorMessage(translate(language, 'voice.noSpeech'));
       }
@@ -136,15 +173,15 @@ export const AudioRecorderButton: React.FC<AudioRecorderButtonProps> = ({
   return (
     <div className="relative inline-flex items-center">
       {isRecording ? (
-        <button
-          type="button"
-          onClick={stopRecording}
-          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-md shadow-rose-200 animate-pulse transition-all ${className}`}
-          title={translate(language, 'voice.stop', { seconds: recordingDuration })}
-        >
-          <Square className="w-3.5 h-3.5 fill-current" />
-          <span>{translate(language, 'voice.stop', { seconds: recordingDuration })}</span>
-        </button>
+        <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-rose-50 border border-rose-200 shadow-sm">
+          <div className="flex items-center gap-0.5 h-6" aria-label="Recording waveform">
+            {waveform.map((height, index) => <span key={index} className="w-0.5 rounded-full bg-rose-500 transition-[height] duration-75" style={{ height }} />)}
+          </div>
+          <button type="button" onClick={stopRecording} className={`flex items-center gap-1 px-2 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs transition-all ${className}`} title={translate(language, 'voice.stop', { seconds: recordingDuration })}>
+            <Square className="w-3 h-3 fill-current" />
+            <span>{translate(language, 'voice.stop', { seconds: recordingDuration })}</span>
+          </button>
+        </div>
       ) : isTranscribing ? (
         <button
           type="button"

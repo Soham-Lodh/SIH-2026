@@ -108,7 +108,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ language, isPlayingAudio,
   );
 };
 
-const ComposerControls: React.FC<{ language: string; inputRef: React.RefObject<HTMLTextAreaElement | null>; onTranscribed: (text: string) => void }> = ({ language, inputRef, onTranscribed }) => {
+const ComposerControls: React.FC<{ language: string; inputRef: React.RefObject<HTMLTextAreaElement | null>; onTranscribed: (text: string, detectedLanguage?: string) => void }> = ({ language, inputRef, onTranscribed }) => {
   const aui = useAui();
   const isRunning = useAuiState((state) => state.thread.isRunning);
   const activeLangObj = INDIAN_LANGUAGES.find((item) => item.code === language) || INDIAN_LANGUAGES[0];
@@ -118,8 +118,8 @@ const ComposerControls: React.FC<{ language: string; inputRef: React.RefObject<H
       <AudioRecorderButton
         language={language}
         targetLanguage={language}
-        onTranscribed={(text) => {
-          onTranscribed(text);
+        onTranscribed={(text, metadata) => {
+          onTranscribed(text, metadata?.detectedLanguage);
           aui.composer.setText(text);
           requestAnimationFrame(() => inputRef.current?.focus());
         }}
@@ -158,6 +158,7 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
   const [messages, setMessages] = useState<ThreadMessageLike[]>([]);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const [transcript, setTranscript] = useState('');
+  const [inputLanguage, setInputLanguage] = useState(language);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const playbackTokenRef = useRef(0);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -184,7 +185,8 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
     messages,
     historyRef: englishHistoryRef,
     onMessagesChange: setMessages,
-  }), [language, associatedBundle, messages]);
+    inputLanguage,
+  }), [language, associatedBundle, messages, inputLanguage]);
   const runtime = useExternalStoreRuntime(adapter);
 
   const stopAudioPlayback = () => {
@@ -262,7 +264,10 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
           </ThreadPrimitive.Viewport>
           <div className="p-3 sm:p-4 border-t border-slate-200 bg-slate-50 space-y-2">
             {transcript && <div className="text-[11px] text-slate-600 px-2">Transcript ready: <span className="font-medium text-slate-900">{transcript}</span></div>}
-            <ComposerControls language={language} inputRef={inputRef} onTranscribed={setTranscript} />
+            <ComposerControls language={language} inputRef={inputRef} onTranscribed={(text, detectedLanguage) => {
+              setTranscript(text);
+              setInputLanguage(detectedLanguage || language);
+            }} />
           </div>
         </ThreadPrimitive.Root>
       </AssistantRuntimeProvider>

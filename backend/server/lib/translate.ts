@@ -1,8 +1,6 @@
-type TranslateResult = {
-  text?: string;
-};
-
 const translationCache = new Map<string, string>();
+const TRANSLATION_ENDPOINT = String(process.env.TRANSLATION_API_URL || 'https://api.mymemory.translated.net/get').trim();
+const MAX_QUERY_BYTES = 480;
 
 export interface LocalizedPresentationText {
   original: string;
@@ -76,32 +74,71 @@ export async function resolveLocalizedPresentation(value: string, targetLanguage
 function normalizeLanguageCode(lang?: string): string {
   const code = (lang || 'en').trim().toLowerCase();
   if (!code || code === 'en') return 'en';
-  return code.split('-')[0];
-}
-
-async function getTranslator(): Promise<(text: string, to: string) => Promise<string>> {
-  const mod = await import('@vitalets/google-translate-api');
-  const translator = (mod as any).default || (mod as any).translate || mod;
-
-  return async (text: string, to: string) => {
-    const result = (await translator(text, { to })) as TranslateResult;
-    return typeof result?.text === 'string' ? result.text : text;
+  const aliases: Record<string, string> = {
+    english: 'en', hindi: 'hi', bengali: 'bn', bangla: 'bn', telugu: 'te', marathi: 'mr',
+    tamil: 'ta', urdu: 'ur', gujarati: 'gu', kannada: 'kn', odia: 'or', oriya: 'or',
+    malayalam: 'ml', punjabi: 'pa', assamese: 'as', maithili: 'mai', nepali: 'ne',
+    konkani: 'kok', sindhi: 'sd', dogri: 'doi', manipuri: 'mni', bodo: 'brx', sanskrit: 'sa',
   };
+  return aliases[code] || code.split('-')[0];
 }
 
-export async function translateText(text: string, targetLanguage?: string): Promise<string> {
+function splitForProvider(text: string): string[] {
+  if (new TextEncoder().encode(text).length <= MAX_QUERY_BYTES) return [text];
+  const chunks: string[] = [];
+  let current = '';
+  for (const word of text.split(/(\s+)/)) {
+    const candidate = current + word;
+    if (current && new TextEncoder().encode(candidate).length > MAX_QUERY_BYTES) {
+      chunks.push(current);
+      current = word.trimStart();
+    } else {
+      current = candidate;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks.length ? chunks : [text];
+}
+
+async function translateChunk(text: string, targetLanguage: string, sourceLanguage: string): Promise<string> {
+  const params = new URLSearchParams({
+    q: text,
+    langpair: `${sourceLanguage || 'en'}|${targetLanguage}`,
+    mt: '1',
+  });
+  try {
+    const response = await fetch(`${TRANSLATION_ENDPOINT}?${params.toString()}`, {
+      headers: { Accept: 'application/json' },
+    });
+    if (!response.ok) return text;
+    const payload = await response.json() as {
+      responseStatus?: number;
+      responseData?: { translatedText?: unknown };
+    };
+    const translated = payload.responseData?.translatedText;
+    return payload.responseStatus === 200 && typeof translated === 'string' && translated.trim()
+      ? translated
+      : text;
+  } catch {
+    return text;
+  }
+}
+
+export async function translateText(text: string, targetLanguage?: string, sourceLanguage = 'en'): Promise<string> {
   const lang = normalizeLanguageCode(targetLanguage);
+  const source = normalizeLanguageCode(sourceLanguage);
   const cleanText = (text || '').toString();
   if (!cleanText.trim()) return cleanText;
+  if (lang === source) return cleanText;
 
-  const cacheKey = `${lang}|${cleanText}`;
+  const cacheKey = `${source}|${lang}|${cleanText}`;
   const cached = translationCache.get(cacheKey);
   if (cached) return cached;
 
   try {
-    const translator = await getTranslator();
-    const translated = await translator(cleanText, lang);
-    const finalText = translated || cleanText;
+    const chunks = splitForProvider(cleanText);
+    const translated = await Promise.all(chunks.map((chunk) => translateChunk(chunk, lang, source)));
+    const finalText = translated.join('') || cleanText;
     translationCache.set(cacheKey, finalText);
     return finalText;
   } catch {
@@ -109,10 +146,10 @@ export async function translateText(text: string, targetLanguage?: string): Prom
   }
 }
 
-export async function translateArray(items: string[], targetLanguage?: string): Promise<string[]> {
+export async function translateArray(items: string[], targetLanguage?: string, sourceLanguage = 'en'): Promise<string[]> {
   const results: string[] = [];
   for (const item of items) {
-    results.push(await translateText(item, targetLanguage));
+    results.push(await translateText(item, targetLanguage, sourceLanguage));
   }
   return results;
 }

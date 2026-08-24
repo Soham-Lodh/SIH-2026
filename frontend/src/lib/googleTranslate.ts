@@ -9,14 +9,12 @@ import type {
   TimelineEvent,
 } from '../types/disaster';
 
-const TRANSLATE_ENDPOINT = 'https://translation.googleapis.com/language/translate/v2';
+// MyMemory is a public, keyless translation service. Keep this URL configurable
+// so deployments can move to another compatible free provider without a build change.
+const TRANSLATE_ENDPOINT = String(import.meta.env.VITE_TRANSLATION_API_URL || 'https://api.mymemory.translated.net/get').trim();
 const MAX_CACHE_ENTRIES = 500;
-const MAX_BATCH_SIZE = 100;
+const MAX_BATCH_SIZE = 12;
 const cache = new Map<string, string>();
-
-function getApiKey(): string {
-  return String(import.meta.env.VITE_GOOGLE_TRANSLATE_API_KEY || '').trim();
-}
 
 function remember(key: string, value: string): string {
   cache.delete(key);
@@ -29,34 +27,74 @@ function remember(key: string, value: string): string {
   return value;
 }
 
-async function requestTranslations(texts: string[], targetLang: string): Promise<string[]> {
-  const key = getApiKey();
-  if (!key || targetLang === 'en' || texts.length === 0) return texts;
+const MAX_QUERY_BYTES = 480;
 
-  try {
-    const response = await fetch(`${TRANSLATE_ENDPOINT}?key=${encodeURIComponent(key)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ q: texts, target: targetLang, source: 'en', format: 'text' }),
-    });
-    if (!response.ok) return texts;
-
-    const payload = (await response.json()) as {
-      data?: { translations?: Array<{ translatedText?: unknown }> };
-    };
-    const translated = payload.data?.translations || [];
-    return texts.map((text, index) => {
-      const value = translated[index]?.translatedText;
-      return typeof value === 'string' && value.trim() ? value : text;
-    });
-  } catch {
-    return texts;
+function splitForProvider(text: string): string[] {
+  if (new TextEncoder().encode(text).length <= MAX_QUERY_BYTES) return [text];
+  const chunks: string[] = [];
+  let current = '';
+  for (const word of text.split(/(\s+)/)) {
+    const candidate = current + word;
+    if (current && new TextEncoder().encode(candidate).length > MAX_QUERY_BYTES) {
+      chunks.push(current);
+      current = word.trimStart();
+    } else {
+      current = candidate;
+    }
   }
+  if (current) chunks.push(current);
+  return chunks.length ? chunks : [text];
 }
 
-export async function translateText(text: string, targetLang: string): Promise<string> {
-  if (!text || targetLang === 'en' || !getApiKey()) return text;
-  const cacheKey = `${targetLang}:${text}`;
+async function requestSingleTranslation(text: string, targetLang: string, sourceLang: string): Promise<string> {
+  const params = new URLSearchParams({
+    q: text,
+    langpair: `${sourceLang || 'en'}|${targetLang}`,
+    mt: '1',
+  });
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+    const response = await fetch(`${TRANSLATE_ENDPOINT}?${params.toString()}`, {
+      headers: { Accept: 'application/json' },
+    });
+    if (response.status === 429 && attempt < 2) {
+      await new Promise((resolve) => window.setTimeout(resolve, 700 * (attempt + 1)));
+      continue;
+    }
+    if (!response.ok) return text;
+    const payload = (await response.json()) as {
+      responseStatus?: number;
+      responseData?: { translatedText?: unknown };
+    };
+    const translated = payload.responseData?.translatedText;
+    return payload.responseStatus === 200 && typeof translated === 'string' && translated.trim()
+      ? translated
+      : text;
+    } catch {
+      if (attempt === 2) return text;
+    }
+  }
+  return text;
+}
+
+async function requestTranslations(texts: string[], targetLang: string, sourceLang = 'en'): Promise<string[]> {
+  if (texts.length === 0 || targetLang === sourceLang) return texts;
+  const output: string[] = [];
+  for (let index = 0; index < texts.length; index += 2) {
+    const pair = texts.slice(index, index + 2);
+    const translatedPair = await Promise.all(pair.map(async (text) => {
+      const parts = splitForProvider(text);
+      const translated = await Promise.all(parts.map((part) => requestSingleTranslation(part, targetLang, sourceLang)));
+      return translated.join('');
+    }));
+    output.push(...translatedPair);
+  }
+  return output;
+}
+
+export async function translateText(text: string, targetLang: string, sourceLang = 'en'): Promise<string> {
+  if (!text || targetLang === sourceLang) return text;
+  const cacheKey = `${sourceLang}:${targetLang}:${text}`;
   const cached = cache.get(cacheKey);
   if (cached !== undefined) {
     cache.delete(cacheKey);
@@ -64,12 +102,12 @@ export async function translateText(text: string, targetLang: string): Promise<s
     return cached;
   }
 
-  const [translated] = await requestTranslations([text], targetLang);
+  const [translated] = await requestTranslations([text,], targetLang, sourceLang);
   return remember(cacheKey, translated || text);
 }
 
-export async function translateBatch(texts: string[], targetLang: string): Promise<string[]> {
-  if (texts.length === 0 || targetLang === 'en' || !getApiKey()) return texts;
+export async function translateBatch(texts: string[], targetLang: string, sourceLang = 'en'): Promise<string[]> {
+  if (texts.length === 0 || targetLang === sourceLang) return texts;
 
   const output = new Array<string>(texts.length);
   const missing: Array<{ index: number; text: string; key: string }> = [];
@@ -79,7 +117,7 @@ export async function translateBatch(texts: string[], targetLang: string): Promi
       output[index] = text;
       return;
     }
-    const key = `${targetLang}:${text}`;
+    const key = `${sourceLang}:${targetLang}:${text}`;
     const cached = cache.get(key);
     if (cached !== undefined) {
       output[index] = cached;
@@ -92,7 +130,7 @@ export async function translateBatch(texts: string[], targetLang: string): Promi
 
   for (let start = 0; start < missing.length; start += MAX_BATCH_SIZE) {
     const chunk = missing.slice(start, start + MAX_BATCH_SIZE);
-    const translated = await requestTranslations(chunk.map((item) => item.text), targetLang);
+    const translated = await requestTranslations(chunk.map((item) => item.text), targetLang, sourceLang);
     chunk.forEach((item, offset) => {
       output[item.index] = remember(item.key, translated[offset] || item.text);
     });
@@ -101,10 +139,10 @@ export async function translateBatch(texts: string[], targetLang: string): Promi
   return output.map((text, index) => text ?? texts[index]);
 }
 
-export async function translatePreservingCitations(text: string, targetLang: string): Promise<string> {
-  if (!text || targetLang === 'en') return text;
+export async function translatePreservingCitations(text: string, targetLang: string, sourceLang = 'en'): Promise<string> {
+  if (!text || targetLang === sourceLang) return text;
   const citations = Array.from(new Set(text.match(/\[S\d+\]/gi) || []));
-  if (citations.length === 0) return translateText(text, targetLang);
+  if (citations.length === 0) return translateText(text, targetLang, sourceLang);
 
   const placeholders = citations.map((citation, index) => ({
     citation,
@@ -117,7 +155,7 @@ export async function translatePreservingCitations(text: string, targetLang: str
       token,
     );
   });
-  let translated = await translateText(protectedText, targetLang);
+  let translated = await translateText(protectedText, targetLang, sourceLang);
   placeholders.forEach(({ citation, token }) => {
     translated = translated.replace(new RegExp(token, 'g'), citation.toUpperCase());
   });

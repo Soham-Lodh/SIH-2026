@@ -98,9 +98,6 @@ export const AlertDetailDrawer: React.FC<AlertDetailDrawerProps> = ({
             <h3 className="font-bold text-sm sm:text-base text-slate-900 truncate">
               {localized('event', alert.event)}
             </h3>
-            <span className="text-[11px] text-slate-500 font-mono block truncate">
-              ID: {alert.identifier || alert.id}
-            </span>
           </div>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
@@ -173,42 +170,14 @@ export const AlertDetailDrawer: React.FC<AlertDetailDrawerProps> = ({
                   <ShieldCheck className="w-4 h-4 text-indigo-600" />
                   <span>{translate(language, 'alerts.liveAdvisory')}</span>
                 </span>
-                <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-white text-indigo-700 border border-indigo-200">
-                  {alert.feedOrigin || 'LIVE_FEED'}
-                </span>
               </div>
 
-              <div className="grid grid-cols-2 gap-2 text-[11px] pt-1">
+              <div className="text-[11px] pt-1">
                 <div>
                   <span className="text-slate-500 block">{translate(language, 'alerts.issuingAuthority')}:</span>
                   <span className="font-semibold text-slate-800">{alert.sourceAgency || alert.sender}</span>
                 </div>
-                <div>
-                  <span className="text-slate-500 block">{translate(language, 'alerts.bulletinReference')}:</span>
-                  <span className="font-mono font-semibold text-slate-800">{alert.bulletinNo || alert.identifier}</span>
-                </div>
               </div>
-            </div>
-
-            {/* Verbatim Official Instructions (Top Priority) */}
-            <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 space-y-2.5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-rose-800 font-bold text-xs uppercase tracking-wider">
-                  <AlertOctagon className="w-4 h-4 text-rose-600" />
-                  <span>{t.officialInstructionTitle}</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleCopyInstruction}
-                  className="px-2.5 py-1 rounded-lg bg-white/90 hover:bg-white text-rose-700 border border-rose-200 text-[11px] font-bold flex items-center gap-1 transition-all"
-                >
-                  <Copy className="w-3 h-3" />
-                  <span>{hasCopiedInstruction ? translate(language, 'common.copied') : translate(language, 'alerts.copyAdvisory')}</span>
-                </button>
-              </div>
-              <p className="text-xs sm:text-sm text-slate-900 font-medium whitespace-pre-line leading-relaxed">
-                {localized('instruction', alert.instruction)}
-              </p>
             </div>
 
             {/* Headline & Overview */}
@@ -226,13 +195,6 @@ export const AlertDetailDrawer: React.FC<AlertDetailDrawerProps> = ({
               <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
                 <span className="text-slate-500 text-[10px] uppercase font-bold">{translate(language, 'alerts.certainty')}</span>
                 <div className="font-semibold text-slate-900 mt-0.5">{alertEnumLabel(language, alert.certainty)}</div>
-              </div>
-              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 col-span-2">
-                <span className="text-slate-500 text-[10px] uppercase font-bold">{translate(language, 'alerts.affectedArea')}</span>
-                <div className="font-semibold text-slate-900 mt-0.5 flex items-center gap-1">
-                  <MapPin className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                  <span>{localized('area', alert.areaDesc)}</span>
-                </div>
               </div>
               <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
                 <span className="text-slate-500 text-[10px] uppercase font-bold">{translate(language, 'alerts.effectiveTime')}</span>

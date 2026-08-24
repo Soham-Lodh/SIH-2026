@@ -97,7 +97,7 @@ export function isGroqConfigured(): boolean {
 function getGroqKey(scope: GroqKeyScope = 'default'): string {
   const scopeEnvMap: Record<Exclude<GroqKeyScope, 'default'>, string[]> = {
     past: ['GROQ_API_KEY_PAST', 'GROQ_API_KEY_HISTORY', 'GROQ_API_KEY'],
-    pastFilters: ['GROQ_API_KEY_PAST_FILTERS', 'GROQ_API_KEY_FILTERED_PAST', 'GROQ_API_KEY_PAST', 'GROQ_API_KEY'],
+    pastFilters: ['GROQ_API_KEY_PAST_FILTERS'],
     chat: ['GROQ_API_KEY_CHAT', 'GROQ_API_KEY_ASSISTANT', 'GROQ_API_KEY'],
     stt: ['GROQ_API_KEY_STT', 'GROQ_API_KEY_AUDIO', 'GROQ_API_KEY'],
     tts: ['GROQ_API_KEY_TTS', 'GROQ_API_KEY_AUDIO', 'GROQ_API_KEY'],
@@ -285,7 +285,7 @@ function mimeToExt(mime: string): string {
   return map[base] || 'webm';
 }
 
-export async function transcribeAudio(audio: Buffer | string, mimeType: string = 'audio/webm'): Promise<string> {
+export async function transcribeAudio(audio: Buffer | string, mimeType: string = 'audio/webm'): Promise<{ text: string; language?: string }> {
   const apiKey = getGroqKey('stt');
   const baseUrl = getGroqBaseUrl();
   const sttModel = getGroqSttModel();
@@ -296,7 +296,9 @@ export async function transcribeAudio(audio: Buffer | string, mimeType: string =
   const normalizedMime = mimeType.split(';')[0] || 'audio/webm';
   form.append('file', new Blob([audioBuffer], { type: normalizedMime }), `audio.${mimeToExt(mimeType)}`);
   form.append('model', sttModel);
-  form.append('response_format', 'json');
+  // verbose_json keeps Whisper's detected language so the client can preserve
+  // the language actually spoken instead of blindly using the UI selection.
+  form.append('response_format', 'verbose_json');
   form.append('temperature', '0');
   form.append(
     'prompt',
@@ -316,8 +318,11 @@ export async function transcribeAudio(audio: Buffer | string, mimeType: string =
     throw new Error(`Groq transcription failed: HTTP ${response.status} ${text}`.trim());
   }
 
-  const data = (await response.json()) as { text?: unknown };
-  return String(data?.text || '').trim();
+  const data = (await response.json()) as { text?: unknown; language?: unknown };
+  return {
+    text: String(data?.text || '').trim(),
+    language: typeof data?.language === 'string' ? data.language.trim() : undefined,
+  };
 }
 
 export async function generateWithFallback(params: {
@@ -628,7 +633,7 @@ function buildArchiveQueryPool(options?: {
     if (!key || seen.has(key)) continue;
     seen.add(key);
     deduped.push(query);
-    if (deduped.length >= Math.max(limit * 5, 100)) break;
+    if (deduped.length >= Math.min(Math.max(limit * 3, 100), 240)) break;
   }
 
   return deduped;
@@ -685,7 +690,8 @@ async function buildArchiveEvidenceBundle(query: string, index: number): Promise
 
   const joinedText = [query, ...citedSources.map((s) => `${s.title} ${s.summary}`)].join(' ');
   const disasterType = inferDisasterType(joinedText);
-  const state = inferState(joinedText);
+  const queryState = inferState(query);
+  const state = queryState !== 'India' ? queryState : inferState(joinedText);
   const location = inferLocation(joinedText, state);
   const topSource = citedSources[0];
   const year = Number(new Date(topSource.publishedAt).getFullYear() || new Date().getFullYear());
@@ -728,7 +734,7 @@ async function buildArchiveEvidenceBundle(query: string, index: number): Promise
   return bundleToArchiveItem(bundle, index);
 }
 
-export async function buildRecentIndiaArchive(limit: number = 30, options?: {
+export async function buildRecentIndiaArchive(limit: number = 100, options?: {
   categoryFilter?: string;
   stateFilter?: string;
   decadeFilter?: string;
@@ -795,7 +801,114 @@ export async function buildRecentIndiaArchive(limit: number = 30, options?: {
   return sorted;
 }
 
-export function warmRecentIndiaArchive(limit: number = 30): void {
+type ArchiveFilterOptions = {
+  categoryFilter?: string;
+  stateFilter?: string;
+  decadeFilter?: string;
+};
+
+async function buildFilterSearchPlan(options: ArchiveFilterOptions, limit: number): Promise<string[]> {
+  const filterSummary = [
+    options.categoryFilter && options.categoryFilter !== 'all' ? `hazard: ${options.categoryFilter}` : '',
+    options.stateFilter && options.stateFilter !== 'All States' ? `state: ${options.stateFilter}` : '',
+    options.decadeFilter && options.decadeFilter !== 'all' ? `era: ${options.decadeFilter}` : '',
+  ].filter(Boolean).join('; ') || 'all Indian disasters';
+
+  const planned = await generateWithFallback({
+    keyScope: 'pastFilters',
+    responseMimeType: 'application/json',
+    systemInstruction: 'You plan evidence searches for Indian disaster research. Return only JSON. Every query must target India and the requested filter. Do not invent events or facts.',
+    prompt: `Create up to ${Math.min(Math.max(limit, 10), 40)} concise Google News search queries for this filter: ${filterSummary}.
+Return exactly {"queries":["..."]}. Use specific Indian states, hazards, districts, or documented event names when helpful. For an era, include the era years in the queries.`,
+  });
+
+  let plannedQueries: string[] = [];
+  if (planned) {
+    try {
+      const parsed = JSON.parse(stripCodeFences(planned));
+      plannedQueries = Array.isArray(parsed?.queries)
+        ? parsed.queries.filter((query: unknown): query is string => typeof query === 'string')
+        : [];
+    } catch (error) {
+      console.warn('Filter search plan parse failed:', (error as Error).message);
+    }
+  }
+
+  const generated = plannedQueries
+    .map((query) => query.replace(/\s+/g, ' ').trim())
+    .filter((query) => query.length >= 8 && /india/i.test(query))
+    .slice(0, 40);
+  const deterministicQueries = buildArchiveQueryPool({ ...options, limit });
+  return Array.from(new Set([...generated, ...deterministicQueries]));
+}
+
+export async function buildFilteredIndiaArchive(
+  limit: number = 100,
+  options: ArchiveFilterOptions = {},
+): Promise<HistoricalDisasterItem[]> {
+  const safeLimit = Math.min(Math.max(Math.floor(limit) || 100, 1), 100);
+  const cacheKey = `filter:${JSON.stringify({
+    limit: safeLimit,
+    categoryFilter: options.categoryFilter || '',
+    stateFilter: options.stateFilter || '',
+    decadeFilter: options.decadeFilter || '',
+  })}`;
+  const cached = recentArchiveCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.items;
+  }
+
+  const queries = await buildFilterSearchPlan(options, safeLimit);
+  const archive: HistoricalDisasterItem[] = [];
+  const seen = new Set<string>();
+  const concurrency = 4;
+
+  const matchesFilters = (item: HistoricalDisasterItem) => {
+    if (options.categoryFilter && options.categoryFilter !== 'all') {
+      const category = options.categoryFilter.toLowerCase();
+      const matchesCategory = item.disasterType.toLowerCase().includes(category) ||
+        (category === 'landslide' && item.disasterType.toLowerCase().includes('avalanche'));
+      if (!matchesCategory) return false;
+    }
+    if (options.stateFilter && options.stateFilter !== 'All States') {
+      const state = options.stateFilter.toLowerCase();
+      const itemState = item.state.toLowerCase();
+      const stateMatches = itemState === state || itemState.includes(state) ||
+        (itemState === 'india' && item.location.toLowerCase().includes(state));
+      if (!stateMatches) return false;
+    }
+    if (options.decadeFilter && options.decadeFilter !== 'all' && item.decade !== options.decadeFilter) {
+      return false;
+    }
+    return true;
+  };
+
+  for (let i = 0; i < queries.length && archive.length < safeLimit; i += concurrency) {
+    const batch = queries.slice(i, i + concurrency);
+    const batchResults = await Promise.allSettled(
+      batch.map((query, offset) => buildArchiveEvidenceBundle(query, i + offset)),
+    );
+
+    for (const result of batchResults) {
+      if (result.status !== 'fulfilled' || !result.value || !matchesFilters(result.value)) continue;
+      const item = result.value;
+      const dedupeKey = `${item.eventName.toLowerCase()}|${item.state.toLowerCase()}|${item.dateRange.toLowerCase()}`;
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+      archive.push(item);
+      if (archive.length >= safeLimit) break;
+    }
+  }
+
+  const sorted = archive.sort((a, b) => b.year - a.year).slice(0, safeLimit);
+  recentArchiveCache.set(cacheKey, {
+    expiresAt: Date.now() + RECENT_ARCHIVE_CACHE_TTL_MS,
+    items: sorted,
+  });
+  return sorted;
+}
+
+export function warmRecentIndiaArchive(limit: number = 100): void {
   if (recentArchiveWarmupStarted) {
     return;
   }
