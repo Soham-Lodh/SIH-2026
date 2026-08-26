@@ -17,6 +17,19 @@ type CacheEntry = {
 const newsCache = new Map<string, CacheEntry>();
 const NEWS_CACHE_TTL_MS = 5 * 60 * 1000;
 
+function cleanNewsText(value: string): string {
+  return value
+    .replace(/<[^>]*>?/gm, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/gi, '"')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 /**
  * Searches Google News RSS for Indian disaster queries and constructs validated URLs.
  */
@@ -96,7 +109,7 @@ export async function searchGoogleNews(
 
         // Clean HTML tags from summary / description
         const rawDesc = String(item.description || item.summary || '');
-        const summary = rawDesc.replace(/<[^>]*>?/gm, '').trim() || title;
+        const summary = cleanNewsText(rawDesc) || cleanNewsText(title);
 
         const gateResult = evaluateTemporalGate(pubDateStr, now, windowHours);
 

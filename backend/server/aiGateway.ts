@@ -10,6 +10,7 @@ import type { HistoricalDisasterItem } from './data/historicalDisasters';
 import {
   extractCasualtyNumericClaims,
   filterIncidentEvidenceArticles,
+  filterSourcesForEvent,
   reconcileNumericClaims,
   validateAndCleanCitations,
 } from './lib/evidenceUtils';
@@ -153,6 +154,18 @@ function stripMarkdownForSpeech(text: string): string {
     .trim();
 }
 
+function sanitizeGeneratedReply(text: string): string {
+  return text
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+}
+
 async function translatePreservingCitations(text: string, targetLanguage?: string): Promise<string> {
   const lang = normalizeLang(targetLanguage);
   if (lang === 'en') return text;
@@ -247,6 +260,33 @@ function formatCasualtyRange(range: ReturnType<typeof reconcileNumericClaims>): 
     : `${range.rangeMin.toLocaleString('en-IN')}-${range.rangeMax.toLocaleString('en-IN')} reported casualties/deaths across clustered source claims.`;
   if (!range.outliers.length) return base;
   return `${base} Outlier claim(s) ${range.outliers.map((value) => value.toLocaleString('en-IN')).join(', ')} excluded from the range.`;
+}
+
+function extractCandidateFacts(sources: CitedSource[]): Record<string, string[]> {
+  const patterns: Record<string, RegExp> = {
+    casualties: /\b(?:\d[\d,]*\s+(?:people\s+)?(?:dead|deaths?|killed|fatalit(?:y|ies)|injured|missing)|(?:dead|deaths?|killed|injured|missing|casualties)[^.;]{0,80}\d[\d,]*)\b/gi,
+    damage: /\b(?:₹|rs\.?|inr|crore|lakh|damage(?:d)?|collapsed?|washed away|destroyed|houses?|roads?|bridges?|power|infrastructure)[^.;]{0,140}/gi,
+    response: /\b(?:ndrf|sdrf|evacuat(?:ed|ion)|rescued?|relief|shelter|army|navy|air force|government|administration)[^.;]{0,140}/gi,
+    location: /\b(?:district|village|state|coast|city|town|taluk|block|panchayat)[^.;]{0,120}/gi,
+    dates: /\b(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2},?\s+(?:19|20)\d{2}|\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+(?:19|20)\d{2}|\b(?:19|20)\d{2}\b)/gi,
+  };
+
+  return Object.fromEntries(Object.entries(patterns).map(([key, pattern]) => [
+    key,
+    sources.flatMap((source) => {
+      const text = `${source.title}. ${source.summary}`;
+      return Array.from(text.matchAll(pattern))
+        .map((match) => `[${source.id}] ${match[0].replace(/\s+/g, ' ').trim()}`)
+        .slice(0, 3);
+    }).slice(0, 10),
+  ]));
+}
+
+function sanitizeUnavailableField(value: string, facts: string[], fallback: string): string {
+  if (facts.length && /information unavailable|not available|not clearly quantified|no .*details/i.test(value)) {
+    return `${fallback} ${facts.slice(0, 3).join('; ')}.`;
+  }
+  return value;
 }
 
 function buildNumericRangeObject(range: ReturnType<typeof reconcileNumericClaims>): EvidenceBundle['numericCasualtiesRange'] | undefined {
@@ -479,10 +519,12 @@ export async function buildHistoricalEvidenceBundle(
     const res = await searchGoogleNews(q, { isCurrentNews: false, maxResults: 4 });
     allArticles.push(...res);
   }
+  let eventFilterQuery = baseQuery;
 
   if (!allArticles.length) {
     const normalizedQuery = await normalizeDisasterSearchQuery(baseQuery);
     if (normalizedQuery) {
+      eventFilterQuery = normalizedQuery;
       searchQueries = Array.from(new Set([
         ...searchQueries,
         normalizedQuery,
@@ -505,7 +547,37 @@ export async function buildHistoricalEvidenceBundle(
     }
   }
 
-  const sourcesList = filterIncidentEvidenceArticles(Array.from(uniqueArticlesMap.values())).slice(0, 6);
+  const incidentArticles = filterIncidentEvidenceArticles(Array.from(uniqueArticlesMap.values()));
+  let sourcesList = filterSourcesForEvent(incidentArticles, {
+    eventName: eventFilterQuery,
+    disasterType: categoryFilter || inferDisasterType(baseQuery),
+    state: stateFilter || inferState(baseQuery),
+    approxDate: eventFilterQuery,
+  }).slice(0, 6);
+  if (!sourcesList.length) {
+    const normalizedQuery = await normalizeDisasterSearchQuery(baseQuery);
+    if (normalizedQuery) {
+      eventFilterQuery = normalizedQuery;
+      const correctedArticles: NewsArticle[] = [];
+      const correctedQueries = [
+        normalizedQuery,
+        `${normalizedQuery} India disaster`,
+        `${normalizedQuery} casualties damage`,
+        `${normalizedQuery} evacuation rescue relief`,
+      ];
+      for (const q of correctedQueries) {
+        const res = await searchGoogleNews(q, { isCurrentNews: false, maxResults: 4 });
+        correctedArticles.push(...res);
+      }
+      searchQueries = Array.from(new Set([...searchQueries, ...correctedQueries]));
+      sourcesList = filterSourcesForEvent(filterIncidentEvidenceArticles(correctedArticles), {
+        eventName: normalizedQuery,
+        disasterType: categoryFilter || inferDisasterType(normalizedQuery),
+        state: stateFilter || inferState(normalizedQuery),
+        approxDate: normalizedQuery,
+      }).slice(0, 6);
+    }
+  }
   if (!sourcesList.length) {
     throw new Error('No live Google News sources were found for this query.');
   }
@@ -525,6 +597,10 @@ export async function buildHistoricalEvidenceBundle(
     .join('\n\n');
   const casualtyReconciliation = reconcileNumericClaims(extractCasualtyNumericClaims(citedSources));
   const casualtyRangeText = formatCasualtyRange(casualtyReconciliation);
+  const candidateFacts = extractCandidateFacts(citedSources);
+  const factsText = Object.entries(candidateFacts)
+    .map(([topic, facts]) => `${topic}: ${facts.length ? facts.join(' | ') : 'none extracted'}`)
+    .join('\n');
 
 const systemInstruction = `You are a Senior Disaster Intelligence Research Architect.
 Synthesize the provided disaster evidence strictly using the source documents labeled [S1], [S2], etc.
@@ -540,6 +616,8 @@ Category Filter: ${categoryFilter || 'None'}
 State Filter: ${stateFilter || 'None'}
 Retrieved Sources:
 ${sourcesText}
+Per-source candidate facts extracted before synthesis:
+${factsText}
 Pre-computed casualty reconciliation:
 ${casualtyRangeText || 'No casualty/death numeric claims were confidently extracted from the source text.'}
 
@@ -554,25 +632,27 @@ Produce a structured historical evidence synthesis in JSON format:
   "dateRange": "Date or range",
   "reportedCasualties": "Reported human loss with citations",
   "reportedDamage": "Summary of infrastructure and economic loss with citations",
-  "whatHappened": "Paragraph synthesizing the disaster event with citations",
-  "affectedAreas": "Geographic districts and communities impacted with citations",
-  "humanImpact": "Detailed human displacement, casualties, and injuries with citations",
-  "infrastructureDamage": "Power, roads, telecommunications, housing loss with citations",
-  "economicImpact": "Agricultural, business, and monetary loss with citations",
-  "governmentResponse": "Evacuation operations, emergency declarations, deployments with citations",
-  "rescueRelief": "Shelter provisioning, ration distribution, medical aid with citations",
-  "recovery": "Reconstruction, utility restoration, long-term rebuilding with citations",
+  "whatHappened": "3-5 factual sentences synthesizing the event with citations",
+  "affectedAreas": "3-5 factual sentences on districts and communities impacted with citations",
+  "humanImpact": "3-5 factual sentences on displacement, casualties, injuries, and missing people with citations",
+  "infrastructureDamage": "3-5 factual sentences on power, roads, telecommunications, housing, and public infrastructure with citations",
+  "economicImpact": "3-5 factual sentences on agricultural, business, and monetary loss with citations",
+  "governmentResponse": "3-5 factual sentences on evacuation operations, declarations, deployments, and administration with citations",
+  "rescueRelief": "3-5 factual sentences on shelters, ration distribution, medical aid, and rescue operations with citations",
+  "recovery": "3-5 factual sentences on reconstruction, utility restoration, rehabilitation, and longer-term rebuilding with citations",
   "sourceAssessment": "Objective assessment of source reliability and coverage completeness",
   "conflictingReports": [{"topic": "Topic", "details": "Conflict summary", "sources": ["S1", "S2"]}],
   "timeline": [{"date": "Date string", "event": "Short title", "description": "Description with citations", "citations": ["S1"]}]
 }`;
+
+  const depthInstruction = `Write 3-5 substantive sentences per narrative section using all available facts across all sources and the extracted fact fragments. Do not output one-line placeholders when source material contains relevant facts for that section.`;
 
   let synthesizedData: any = null;
 
   try {
     const rawJson = await generateWithFallback({
       prompt,
-      systemInstruction,
+      systemInstruction: `${systemInstruction}\n${depthInstruction}`,
       responseMimeType: 'application/json',
       keyScope: categoryFilter || stateFilter ? 'pastFilters' : 'past',
     });
@@ -589,12 +669,12 @@ Produce a structured historical evidence synthesis in JSON format:
   }
 
   const whatHappened = validateAndCleanCitations(synthesizedData.whatHappened || '', citedSources);
-  const affectedAreas = validateAndCleanCitations(synthesizedData.affectedAreas || '', citedSources);
-  const humanImpact = validateAndCleanCitations(synthesizedData.humanImpact || '', citedSources);
-  const infrastructureDamage = validateAndCleanCitations(synthesizedData.infrastructureDamage || '', citedSources);
-  const economicImpact = validateAndCleanCitations(synthesizedData.economicImpact || '', citedSources);
-  const governmentResponse = validateAndCleanCitations(synthesizedData.governmentResponse || '', citedSources);
-  const rescueRelief = validateAndCleanCitations(synthesizedData.rescueRelief || '', citedSources);
+  const affectedAreas = validateAndCleanCitations(sanitizeUnavailableField(synthesizedData.affectedAreas || '', candidateFacts.location, 'Affected locations extracted from sources:'), citedSources);
+  const humanImpact = validateAndCleanCitations(sanitizeUnavailableField(synthesizedData.humanImpact || '', candidateFacts.casualties, 'Human-impact facts extracted from sources:'), citedSources);
+  const infrastructureDamage = validateAndCleanCitations(sanitizeUnavailableField(synthesizedData.infrastructureDamage || '', candidateFacts.damage, 'Damage facts extracted from sources:'), citedSources);
+  const economicImpact = validateAndCleanCitations(sanitizeUnavailableField(synthesizedData.economicImpact || '', candidateFacts.damage, 'Economic or damage facts extracted from sources:'), citedSources);
+  const governmentResponse = validateAndCleanCitations(sanitizeUnavailableField(synthesizedData.governmentResponse || '', candidateFacts.response, 'Response facts extracted from sources:'), citedSources);
+  const rescueRelief = validateAndCleanCitations(sanitizeUnavailableField(synthesizedData.rescueRelief || '', candidateFacts.response, 'Rescue and relief facts extracted from sources:'), citedSources);
   const recovery = validateAndCleanCitations(synthesizedData.recovery || '', citedSources);
   const reportedCasualties = validateAndCleanCitations(
     casualtyRangeText || synthesizedData.reportedCasualties || '',
@@ -617,7 +697,8 @@ Produce a structured historical evidence synthesis in JSON format:
     sources: (c.sources || []).filter((sId: string) => citedSources.some((s) => s.id === sId)),
     })),
   ];
-  const eventDate = coerceIsoDate(synthesizedData.eventDate || synthesizedData.dateRange);
+  const eventDate = coerceIsoDate(synthesizedData.eventDate || synthesizedData.dateRange)
+    || coerceIsoDate([eventFilterQuery, ...candidateFacts.dates].join(' '));
 
   const bundle: EvidenceBundle = {
     id: `ev-${Date.now()}-${Math.random().toString(36).substring(7)}`,
@@ -776,11 +857,12 @@ function bundleToArchiveItem(bundle: EvidenceBundle, index: number): HistoricalD
   };
 }
 
-function makeArchiveTimeline(sources: CitedSource[]): TimelineEvent[] {
+function makeArchiveTimeline(sources: CitedSource[], eventDate?: string): TimelineEvent[] {
+  const incidentDate = eventDate ? formatDisasterDate(eventDate) : 'Recorded period';
   if (sources.length === 0) {
     return [
       {
-        date: 'Recorded period',
+        date: incidentDate,
         event: 'Event summary unavailable',
         description: 'No archived source timeline could be synthesized.',
         citations: [],
@@ -789,7 +871,7 @@ function makeArchiveTimeline(sources: CitedSource[]): TimelineEvent[] {
   }
 
   return sources.map((source, idx) => ({
-    date: formatDisasterDate(source.publishedAt),
+    date: incidentDate,
     event: source.title.slice(0, 48),
     description: `${source.summary} [${source.id}]`,
     citations: [source.id],
@@ -798,7 +880,13 @@ function makeArchiveTimeline(sources: CitedSource[]): TimelineEvent[] {
 
 async function buildArchiveEvidenceBundle(query: string, index: number, seed?: EraDisasterSeed): Promise<HistoricalDisasterItem | null> {
   const articles = await searchGoogleNews(query, { isCurrentNews: false, maxResults: 3 });
-  const sourcesList = filterIncidentEvidenceArticles(articles).slice(0, 3);
+  const incidentArticles = filterIncidentEvidenceArticles(articles);
+  const sourcesList = filterSourcesForEvent(incidentArticles, {
+    eventName: seed?.eventName || query,
+    disasterType: seed?.disasterType || inferDisasterType(query),
+    state: seed?.state || inferState(query),
+    approxDate: seed?.approxDate,
+  }).slice(0, 3);
 
   if (!sourcesList.length && !seed) {
     return null;
@@ -820,7 +908,7 @@ async function buildArchiveEvidenceBundle(query: string, index: number, seed?: E
   const state = queryState !== 'India' ? queryState : inferState(joinedText);
   const location = seed?.location || inferLocation(joinedText, state);
   const topSource = citedSources[0];
-  const eventDate = coerceIsoDate(seed?.eventDate || seed?.approxDate) || coerceIsoDate(topSource?.publishedAt);
+  const eventDate = coerceIsoDate(seed?.eventDate || seed?.approxDate || query);
   const casualtyReconciliation = reconcileNumericClaims(extractCasualtyNumericClaims(citedSources));
   const casualtyRangeText = formatCasualtyRange(casualtyReconciliation);
   const sourceCitation = citedSources[0] ? ` [${citedSources[0].id}]` : '';
@@ -838,7 +926,7 @@ async function buildArchiveEvidenceBundle(query: string, index: number, seed?: E
     reportedCasualties: casualtyRangeText || 'Information unavailable in the retrieved sources.',
     reportedDamage: 'Information unavailable in the retrieved sources.',
     sources: citedSources,
-    timeline: makeArchiveTimeline(citedSources),
+    timeline: makeArchiveTimeline(citedSources, eventDate),
     whatHappened: citedSources.length
       ? citedSources.map((s) => `${s.summary} [${s.id}]`).join(' ')
       : `${seed?.eventName || query} is a model-sourced historical Indian disaster seed for ${location}, ${state}. External Google News citations were sparse for this era.`,
@@ -1322,7 +1410,13 @@ export async function chatResearchAssistant(params: {
       `Sources:\n` +
       evidenceSources.map((s: CitedSource) => `[${s.id}] ${s.title} (${s.publisher}): ${s.summary}`).join('\n');
   } else {
-    const articles = await searchGoogleNews(englishMessage, { isCurrentNews: false, maxResults: 4 });
+    let articles = await searchGoogleNews(englishMessage, { isCurrentNews: false, maxResults: 4 });
+    if (!articles.length) {
+      const normalizedQuery = await normalizeDisasterSearchQuery(englishMessage);
+      if (normalizedQuery) {
+        articles = await searchGoogleNews(normalizedQuery, { isCurrentNews: false, maxResults: 4 });
+      }
+    }
     evidenceSources = articles.map((art, idx) => ({
       id: `S${idx + 1}`,
       title: art.title,
@@ -1345,8 +1439,11 @@ Your goal is to answer queries strictly grounded in retrieved evidence.
 RULES:
 1. Support factual claims with citations [S1], [S2], etc.
 2. If facts are not in the sources, say "Information unavailable in the retrieved sources."
-3. Format with clean Markdown headers, bullet points, and tables where appropriate.
-4. ${langInstruction}`;
+3. Check spelling and grammar before responding. Output only clean professional text in the requested language.
+4. Use concise Markdown: short paragraphs and bullet lists. Use tables only for truly tabular comparisons.
+5. Do not emit raw HTML entities such as &nbsp;.
+6. Avoid boilerplate disclaimers unless the evidence is genuinely missing.
+7. ${langInstruction}`;
 
   const prompt = `Conversation Context:
 ${history.slice(-4).map((h) => `${h.role === 'user' ? 'User' : 'Assistant'}: ${h.content}`).join('\n')}
@@ -1371,8 +1468,9 @@ Provide a professional, cited research answer:`;
       : `Information unavailable in the retrieved sources for this query.`;
   }
 
-  reply = validateAndCleanCitations(reply, evidenceSources);
+  reply = sanitizeGeneratedReply(validateAndCleanCitations(reply, evidenceSources));
   reply = await translatePreservingCitations(reply, targetLanguage);
+  reply = sanitizeGeneratedReply(reply);
 
   return {
     reply,
