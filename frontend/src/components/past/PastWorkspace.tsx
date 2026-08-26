@@ -648,6 +648,12 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                  e.preventDefault();
+                  void handleLiveQuerySearch(searchQuery);
+                }
+              }}
               placeholder={translate(language, 'history.searchPlaceholder')}
               className="w-full pl-10 pr-20 py-2.5 text-xs sm:text-sm rounded-xl bg-slate-50 border border-slate-200 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
             />

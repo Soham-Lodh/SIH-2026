@@ -9,7 +9,8 @@ import {
   useAuiState,
   useExternalStoreRuntime,
 } from '@assistant-ui/react';
-import { MarkdownTextPrimitive } from '@assistant-ui/react-markdown';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   X,
   Sparkles,
@@ -49,9 +50,9 @@ function stripMarkdownForSpeech(text: string): string {
     .trim();
 }
 
-const MarkdownMessageText: React.FC = () => (
-  <div className="prose prose-sm max-w-none text-slate-800 prose-headings:text-slate-900 prose-a:text-indigo-700 prose-code:text-slate-900">
-    <MarkdownTextPrimitive />
+const MarkdownMessageText: React.FC<{ text: string }> = ({ text }) => (
+  <div className="prose prose-sm max-w-none text-slate-800 prose-headings:text-slate-900 prose-a:text-indigo-700 prose-code:text-slate-900 prose-table:text-xs prose-th:bg-slate-100 prose-th:p-2 prose-td:p-2 prose-td:border prose-th:border prose-table:border-collapse">
+    <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
   </div>
 );
 
@@ -79,7 +80,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ language, isPlayingAudio,
       </div>
       <div className={`space-y-1.5 max-w-[86%] ${isAssistant ? 'text-left' : 'text-right'}`}>
         <div className={`p-3.5 rounded-2xl text-xs sm:text-sm leading-relaxed ${isAssistant ? 'bg-slate-50 border border-slate-200 rounded-tl-none' : 'bg-indigo-600 text-white rounded-tr-none shadow-sm'}`}>
-          <MessagePrimitive.Parts components={{ Text: isAssistant ? MarkdownMessageText : undefined }} />
+          {isAssistant ? <MarkdownMessageText text={messageSpeechText} /> : <MessagePrimitive.Parts />}
         </div>
         {isAssistant && (
           <div className="flex flex-wrap items-center gap-2 pt-0.5">

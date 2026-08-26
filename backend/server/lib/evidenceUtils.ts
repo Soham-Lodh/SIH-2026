@@ -13,6 +13,13 @@ export interface NumericReconciliationResult {
   outlierClaims: NumericClaim[];
 }
 
+export interface EventSourceFilterContext {
+  eventName: string;
+  disasterType?: string;
+  state?: string;
+  approxDate?: string;
+}
+
 /**
  * Validates and sanitizes citation references in text.
  * If text contains [S7] or [S99] but only [S1, S2, S3] exist in the evidence bundle,
@@ -254,4 +261,71 @@ export function scoreIncidentEvidence(article: Pick<NewsArticle, 'title' | 'summ
 
 export function filterIncidentEvidenceArticles<T extends Pick<NewsArticle, 'title' | 'summary'>>(articles: T[]): T[] {
   return articles.filter((article) => scoreIncidentEvidence(article) > 0);
+}
+
+const disasterTerms = new Set([
+  'cyclone',
+  'flood',
+  'floods',
+  'earthquake',
+  'landslide',
+  'landslides',
+  'disaster',
+  'storm',
+  'rain',
+  'heavy',
+  'heat',
+  'wave',
+  'india',
+  'indian',
+  'alert',
+  'warning',
+  'casualties',
+  'damage',
+  'rescue',
+  'relief',
+]);
+
+function tokenizeSpecificTerms(value: string): string[] {
+  return value
+    .toLowerCase()
+    .replace(/[^\w\s]/g, ' ')
+    .split(/\s+/)
+    .map((term) => term.trim())
+    .filter((term) => term.length >= 4 && !disasterTerms.has(term));
+}
+
+function eventYear(value?: string): string | null {
+  if (!value) return null;
+  return value.match(/\b(19\d\d|20\d\d)\b/)?.[0] || null;
+}
+
+/**
+ * Event-specific relevance gate for citation integrity. A source must mention
+ * the named event/alias or enough specific entities to distinguish it from
+ * generic disaster coverage.
+ */
+export function filterSourcesForEvent<T extends Pick<NewsArticle, 'title' | 'summary'>>(
+  articles: T[],
+  context: EventSourceFilterContext,
+): T[] {
+  const eventName = context.eventName.trim().toLowerCase();
+  const specificTerms = tokenizeSpecificTerms(context.eventName);
+  const requiredYear = eventYear(context.approxDate || context.eventName);
+  const state = context.state?.trim().toLowerCase();
+  const disasterType = context.disasterType?.trim().toLowerCase();
+
+  return articles.filter((article) => {
+    const text = `${article.title || ''}. ${article.summary || ''}`.toLowerCase();
+    if (eventName.length >= 4 && text.includes(eventName)) return true;
+
+    const overlap = specificTerms.filter((term) => text.includes(term)).length;
+    if (overlap >= 1 && requiredYear && text.includes(requiredYear)) return true;
+    if (overlap >= 2) return true;
+
+    const hasState = Boolean(state && text.includes(state));
+    const hasType = Boolean(disasterType && text.includes(disasterType));
+    const hasYear = Boolean(requiredYear && text.includes(requiredYear));
+    return hasState && hasType && hasYear;
+  });
 }
