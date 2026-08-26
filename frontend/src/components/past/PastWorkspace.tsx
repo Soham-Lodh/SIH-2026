@@ -139,6 +139,22 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
   const isNoLiveSourcesMessage = (message: string | null) =>
     Boolean(message && /no live .*sources/i.test(message));
 
+  const isMeaningfulEvidenceText = (text?: string | null) => {
+    if (!text) return false;
+    const normalized = text.replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+    if (normalized.length < 20) return false;
+    return ![
+      'information unavailable',
+      'details were not clearly quantified',
+      'details were referenced',
+      'were referenced in the retrieved source coverage',
+      'were summarized in the retrieved source coverage',
+      'documented in source coverage',
+      'documented in cited journalism',
+      'not available',
+    ].some((phrase) => normalized.includes(phrase));
+  };
+
   useEffect(() => {
     let cancelled = false;
 
@@ -275,7 +291,7 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
         }
 
         if (data?.noResults || !data?.bundle) {
-          setSearchError('No matching sources were found for this query. Try a broader disaster name, district, or state.');
+          setSearchError(data?.details || 'No sufficiently relevant historical evidence was retrieved. Try a broader disaster name, district, or state.');
           return;
         }
 
@@ -419,6 +435,9 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
 
   const renderCard = (bundle: HistoricalDisasterItem) => {
     const isSelectedForCompare = compareList.some((item) => item.id === bundle.id);
+    const hasCasualties = isMeaningfulEvidenceText(bundle.reportedCasualties);
+    const hasDamage = isMeaningfulEvidenceText(bundle.reportedDamage);
+    const hasImpactSummary = hasCasualties || hasDamage;
 
     return (
       <div
@@ -459,27 +478,38 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
-          <div className="p-3 rounded-xl bg-rose-50/50 border border-rose-100 space-y-0.5">
-            <span className="text-rose-700 font-bold text-[10px] uppercase flex items-center gap-1">
-              <Users className="w-3.5 h-3.5 text-rose-600" />
-              <span>{translate(language, 'history.casualties')}</span>
-            </span>
-            <p className="text-slate-800 line-clamp-2 leading-relaxed text-xs font-medium">
-              <TranslatedText text={bundle.reportedCasualties} language={language} />
-            </p>
-          </div>
+        {hasImpactSummary ? (
+          <div className={`grid grid-cols-1 ${hasCasualties && hasDamage ? 'sm:grid-cols-2' : ''} gap-2.5 text-xs`}>
+            {hasCasualties && (
+              <div className="p-3 rounded-xl bg-rose-50/50 border border-rose-100 space-y-0.5">
+                <span className="text-rose-700 font-bold text-[10px] uppercase flex items-center gap-1">
+                  <Users className="w-3.5 h-3.5 text-rose-600" />
+                  <span>{translate(language, 'history.casualties')}</span>
+                </span>
+                <p className="text-slate-800 line-clamp-2 leading-relaxed text-xs font-medium">
+                  <TranslatedText text={bundle.reportedCasualties} language={language} />
+                </p>
+              </div>
+            )}
 
-          <div className="p-3 rounded-xl bg-amber-50/50 border border-amber-100 space-y-0.5">
-            <span className="text-amber-800 font-bold text-[10px] uppercase flex items-center gap-1">
-              <Building className="w-3.5 h-3.5 text-amber-600" />
-              <span>{translate(language, 'history.damage')}</span>
-            </span>
-            <p className="text-slate-800 line-clamp-2 leading-relaxed text-xs font-medium">
-              <TranslatedText text={bundle.reportedDamage} language={language} />
-            </p>
+            {hasDamage && (
+              <div className="p-3 rounded-xl bg-amber-50/50 border border-amber-100 space-y-0.5">
+                <span className="text-amber-800 font-bold text-[10px] uppercase flex items-center gap-1">
+                  <Building className="w-3.5 h-3.5 text-amber-600" />
+                  <span>{translate(language, 'history.damage')}</span>
+                </span>
+                <p className="text-slate-800 line-clamp-2 leading-relaxed text-xs font-medium">
+                  <TranslatedText text={bundle.reportedDamage} language={language} />
+                </p>
+              </div>
+            )}
           </div>
-        </div>
+        ) : (
+          <div className="flex items-center gap-2 text-[11px] font-semibold text-slate-500">
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+            <span>{bundle.evidenceStatus}</span>
+          </div>
+        )}
 
         <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed">
           <TranslatedText text={bundle.whatHappened} language={language} />

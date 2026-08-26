@@ -310,12 +310,14 @@ router.post('/past/search', async (req: Request, res: Response) => {
     res.json({ bundle: await localizeEvidenceBundle(bundle, targetLanguage) });
   } catch (error) {
     const details = (error as Error).message;
-    if (/no live google news sources were found/i.test(details)) {
+    if (/no live google news sources were found|insufficient relevant historical evidence/i.test(details)) {
       return res.status(200).json({
         bundle: null,
         noResults: true,
         error: null,
-        details: 'No live news sources were found for this query.',
+        details: /insufficient/i.test(details)
+          ? 'Insufficient relevant historical evidence was retrieved to build a reliable dossier for this event.'
+          : 'No live news sources were found for this query.',
       });
     }
 

@@ -30,6 +30,14 @@ function cleanNewsText(value: string): string {
     .trim();
 }
 
+function buildSearchPhrase(query: string, isCurrentNews: boolean): string {
+  const cleanQuery = query.replace(/[^\w\s]/gi, ' ').replace(/\s+/g, ' ').trim();
+  if (!cleanQuery) return isCurrentNews ? 'India disaster alert' : 'India disaster';
+  if (isCurrentNews) return `${cleanQuery} India disaster weather alert`;
+  const hasIndia = /\bindia|indian|odisha|kerala|gujarat|bengal|uttarakhand|maharashtra|assam|bihar|tamil|karnataka|andhra|telangana|rajasthan|sikkim|kashmir|ladakh|goa|punjab|haryana|delhi\b/i.test(cleanQuery);
+  return hasIndia ? cleanQuery : `${cleanQuery} India`;
+}
+
 /**
  * Searches Google News RSS for Indian disaster queries and constructs validated URLs.
  */
@@ -54,9 +62,7 @@ export async function searchGoogleNews(
     return cached.articles.slice(0, maxResults);
   }
 
-  // Clean query for best Google News retrieval
-  const cleanQuery = query.replace(/[^\w\s]/gi, ' ').trim();
-  const searchPhrase = `${cleanQuery} India disaster weather alert`;
+  const searchPhrase = buildSearchPhrase(query, isCurrentNews);
   const encodedQuery = encodeURIComponent(searchPhrase);
   const rssUrl = `https://news.google.com/rss/search?q=${encodedQuery}&hl=en-IN&gl=IN&ceid=IN:en`;
 

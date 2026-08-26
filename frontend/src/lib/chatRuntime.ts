@@ -55,8 +55,9 @@ export function createChatRuntime(
       messages = [...messages, userMessage];
       adapter.messages = messages;
       publish();
-      setRunning(true);
       adapter.isRunning = true;
+      setRunning(true);
+      publish();
 
       try {
         const inputLanguage = options.inputLanguage || language;

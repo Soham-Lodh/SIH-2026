@@ -8,10 +8,12 @@ import {
 } from './types/disaster';
 import type { HistoricalDisasterItem } from './data/historicalDisasters';
 import {
+  deduplicateNewsArticles,
   extractCasualtyNumericClaims,
   filterIncidentEvidenceArticles,
   filterSourcesForEvent,
   reconcileNumericClaims,
+  scoreIncidentEvidence,
   validateAndCleanCitations,
 } from './lib/evidenceUtils';
 import { coerceIsoDate, formatDisasterDate } from './lib/dateFormat';
@@ -82,6 +84,132 @@ const INDIAN_STATES = [
   'delhi',
   'jammu and kashmir',
   'puducherry',
+];
+
+export type NormalizedHistoricalEvent = {
+  originalQuery: string;
+  normalizedQuery: string;
+  aliases: string[];
+  disasterType?: DisasterCategory;
+  location?: string;
+  state?: string;
+  year?: number;
+  eventDate?: string;
+  confidence: number;
+};
+
+type EvidenceCoverage = {
+  eventConfirmed: boolean;
+  eventNameConfidence: number;
+  relevantSourceCount: number;
+  distinctPublisherCount: number;
+  overview: boolean;
+  eventDate: boolean;
+  location: boolean;
+  affectedAreas: boolean;
+  casualtyData: boolean;
+  injuryData: boolean;
+  displacementData: boolean;
+  infrastructureDamage: boolean;
+  economicImpact: boolean;
+  governmentResponse: boolean;
+  rescueRelief: boolean;
+  recovery: boolean;
+  meaningfulTimelineEntries: number;
+  sourceRelevanceScore: number;
+  evidenceDepthScore: number;
+  overallQualityScore: number;
+  qualifies: boolean;
+};
+
+const NORMALIZATION_REPLACEMENTS: Array<[RegExp, string]> = [
+  [/\bgujrat\b/gi, 'Gujarat'],
+  [/\bgujarath\b/gi, 'Gujarat'],
+  [/\bgujrath\b/gi, 'Gujarat'],
+  [/\bearthqake\b/gi, 'earthquake'],
+  [/\bearthquak\b/gi, 'earthquake'],
+  [/\berthquake\b/gi, 'earthquake'],
+  [/\bwaynad\b/gi, 'Wayanad'],
+  [/\bwayanad landslides\b/gi, 'Wayanad landslide'],
+  [/\bamfan\b/gi, 'Cyclone Amphan'],
+  [/\bamphan cyclone\b/gi, 'Cyclone Amphan'],
+  [/\buttrakahand\b/gi, 'Uttarakhand'],
+  [/\buttrakhand\b/gi, 'Uttarakhand'],
+  [/\borrisa\b/gi, 'Odisha'],
+  [/\borissa\b/gi, 'Odisha'],
+  [/\bkutch quake\b/gi, 'Bhuj earthquake'],
+  [/\bbhuj quake\b/gi, 'Bhuj earthquake'],
+];
+
+const KNOWN_EVENT_ALIASES: Array<{
+  match: RegExp;
+  event: Omit<NormalizedHistoricalEvent, 'originalQuery'>;
+}> = [
+  {
+    match: /\b(2001\s+)?(gujarat|bhuj|kutch).*(earthquake|quake)|\b(republic day earthquake)\b/i,
+    event: {
+      normalizedQuery: '2001 Gujarat earthquake',
+      aliases: ['Bhuj earthquake', 'Kutch earthquake', 'Republic Day earthquake Gujarat 2001'],
+      disasterType: 'Earthquake',
+      location: 'Bhuj and Kutch',
+      state: 'Gujarat',
+      year: 2001,
+      eventDate: '2001-01-26T00:00:00.000Z',
+      confidence: 0.96,
+    },
+  },
+  {
+    match: /\b(amphan|amfan)\b/i,
+    event: {
+      normalizedQuery: 'Cyclone Amphan',
+      aliases: ['2020 Cyclone Amphan', 'Amphan West Bengal cyclone'],
+      disasterType: 'Cyclone',
+      location: 'West Bengal and Odisha coast',
+      state: 'West Bengal',
+      year: 2020,
+      eventDate: '2020-05-20T00:00:00.000Z',
+      confidence: 0.95,
+    },
+  },
+  {
+    match: /\b(wayanad|waynad).*(landslide|landslides)\b/i,
+    event: {
+      normalizedQuery: '2024 Wayanad landslide',
+      aliases: ['Wayanad landslides', 'Chooralmala Mundakkai landslide'],
+      disasterType: 'Landslide',
+      location: 'Wayanad',
+      state: 'Kerala',
+      year: 2024,
+      eventDate: '2024-07-30T00:00:00.000Z',
+      confidence: 0.94,
+    },
+  },
+  {
+    match: /\b(1999\s+)?(odisha|orissa).*(super cyclone|cyclone)\b/i,
+    event: {
+      normalizedQuery: '1999 Odisha Super Cyclone',
+      aliases: ['1999 Orissa cyclone', 'Odisha super cyclone'],
+      disasterType: 'Cyclone',
+      location: 'Odisha coast',
+      state: 'Odisha',
+      year: 1999,
+      eventDate: '1999-10-29T00:00:00.000Z',
+      confidence: 0.94,
+    },
+  },
+  {
+    match: /\b(2018\s+)?kerala.*flood/i,
+    event: {
+      normalizedQuery: '2018 Kerala floods',
+      aliases: ['Kerala floods 2018'],
+      disasterType: 'Flood',
+      location: 'Kerala',
+      state: 'Kerala',
+      year: 2018,
+      eventDate: '2018-08-15T00:00:00.000Z',
+      confidence: 0.9,
+    },
+  },
 ];
 
 function getGroqBaseUrl(): string {
@@ -195,7 +323,7 @@ function inferDisasterType(text: string): DisasterCategory {
   const lower = text.toLowerCase();
   if (lower.includes('cyclone') || lower.includes('storm')) return 'Cyclone';
   if (lower.includes('flood') || lower.includes('inundat') || lower.includes('waterlogging')) return 'Flood';
-  if (lower.includes('earthquake') || lower.includes('seismic') || lower.includes('tremor')) return 'Earthquake';
+  if (lower.includes('earthquake') || lower.includes('quake') || lower.includes('seismic') || lower.includes('tremor')) return 'Earthquake';
   if (lower.includes('landslide') || lower.includes('mudslide') || lower.includes('rockfall')) return 'Landslide';
   if (lower.includes('heat wave') || lower.includes('heatwave') || lower.includes('heat')) return 'Heat Wave';
   if (lower.includes('thunderstorm')) return 'Thunderstorm';
@@ -313,6 +441,8 @@ function buildNumericConflictReports(range: ReturnType<typeof reconcileNumericCl
 function normalizeSynthesizedData(raw: any, fallbackQuery: string, sources: CitedSource[]): any {
   const fallback = buildDeterministicFallbackSynthesis(fallbackQuery, sources);
   const data = raw && typeof raw === 'object' ? raw : {};
+  const textField = (key: keyof typeof fallback) =>
+    typeof data[key] === 'string' && hasMeaningfulText(data[key]) ? cleanEvidenceText(data[key]) : fallback[key];
   return {
     ...fallback,
     ...data,
@@ -323,6 +453,17 @@ function normalizeSynthesizedData(raw: any, fallbackQuery: string, sources: Cite
     country: 'India',
     dateRange: typeof data.dateRange === 'string' && data.dateRange.trim() ? data.dateRange.trim() : fallback.dateRange,
     eventDate: coerceIsoDate(data.eventDate || data.approxDate || data.dateRange),
+    reportedCasualties: textField('reportedCasualties'),
+    reportedDamage: textField('reportedDamage'),
+    whatHappened: textField('whatHappened'),
+    affectedAreas: textField('affectedAreas'),
+    humanImpact: textField('humanImpact'),
+    infrastructureDamage: textField('infrastructureDamage'),
+    economicImpact: textField('economicImpact'),
+    governmentResponse: textField('governmentResponse'),
+    rescueRelief: textField('rescueRelief'),
+    recovery: textField('recovery'),
+    sourceAssessment: textField('sourceAssessment'),
     conflictingReports: Array.isArray(data.conflictingReports) ? data.conflictingReports : [],
     timeline: Array.isArray(data.timeline) ? data.timeline : [],
   };
@@ -483,14 +624,243 @@ async function normalizeDisasterSearchQuery(query: string): Promise<string | nul
   return normalized;
 }
 
+function cleanEvidenceText(value?: string): string {
+  return String(value || '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/gi, '"')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function applyDeterministicNormalization(query: string): string {
+  return NORMALIZATION_REPLACEMENTS.reduce(
+    (value, [pattern, replacement]) => value.replace(pattern, replacement),
+    query.replace(/[^\w\s-]/g, ' ').replace(/\s+/g, ' ').trim(),
+  ).replace(/\s+/g, ' ').trim();
+}
+
+export function normalizeHistoricalEventQuery(query: string): NormalizedHistoricalEvent {
+  const originalQuery = query.trim();
+  const corrected = applyDeterministicNormalization(originalQuery);
+  for (const alias of KNOWN_EVENT_ALIASES) {
+    if (alias.match.test(corrected)) {
+      return { originalQuery, ...alias.event };
+    }
+  }
+
+  const year = corrected.match(/\b(19\d\d|20\d\d)\b/)?.[0];
+  const disasterType = inferDisasterType(corrected);
+  const state = inferState(corrected);
+  const normalizedQuery = corrected
+    .replace(/\bfloods\b/gi, 'flood')
+    .replace(/\blandslides\b/gi, 'landslide')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return {
+    originalQuery,
+    normalizedQuery,
+    aliases: normalizedQuery.toLowerCase() === originalQuery.toLowerCase() ? [] : [originalQuery],
+    disasterType,
+    location: inferLocation(normalizedQuery, state),
+    state,
+    year: year ? Number(year) : undefined,
+    eventDate: coerceIsoDate(normalizedQuery),
+    confidence: normalizedQuery === originalQuery ? 0.72 : 0.84,
+  };
+}
+
+function buildHistoricalResearchQueries(event: NormalizedHistoricalEvent, categoryFilter?: string, stateFilter?: string): string[] {
+  const base = event.normalizedQuery || event.originalQuery;
+  const location = stateFilter || event.state || event.location || '';
+  const type = categoryFilter || event.disasterType || '';
+  const year = event.year ? String(event.year) : '';
+  const aliases = [base, ...event.aliases].filter(Boolean);
+  const dimensions = [
+    '',
+    'India',
+    'what happened history impact',
+    'casualties deaths injured missing',
+    'affected districts villages towns',
+    'houses damaged infrastructure roads bridges power',
+    'economic loss damage estimate',
+    'rescue relief evacuation government response',
+    'timeline aftermath recovery reconstruction',
+    'official report',
+  ];
+
+  const queries = aliases.flatMap((alias) =>
+    dimensions.map((dimension) => [alias, year && !alias.includes(year) ? year : '', location, type, dimension]
+      .filter(Boolean)
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim()),
+  );
+
+  return Array.from(new Set(queries)).slice(0, 18);
+}
+
+function publisherKey(source: Pick<CitedSource, 'publisher'>): string {
+  return source.publisher.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() || 'unknown';
+}
+
+function hasMeaningfulText(value?: string | null): boolean {
+  if (!value) return false;
+  const normalized = cleanEvidenceText(value).toLowerCase();
+  if (normalized.length < 24) return false;
+  const placeholders = [
+    'information unavailable',
+    'no information available',
+    'details were not clearly quantified',
+    'details were referenced',
+    'were referenced in the retrieved source coverage',
+    'were summarized in the retrieved source coverage',
+    'requires external archival corroboration',
+    'documented in source coverage',
+    'documented in cited journalism',
+    'state disaster management authority and ndrf mobilization recorded',
+    'shelter operations, dry food packets, and medical deployment',
+    'long-term rehabilitation and infrastructure reconstruction initiatives',
+  ];
+  if (placeholders.some((phrase) => normalized.includes(phrase))) return false;
+  return /[a-z]/i.test(normalized.replace(/\[S\d+\]/gi, ''));
+}
+
+function extractBestFact(sources: CitedSource[], topic: keyof ReturnType<typeof extractCandidateFacts>, fallback = ''): string {
+  const facts = extractCandidateFacts(sources)[topic] || [];
+  return facts.length ? facts.slice(0, 3).join('; ') + '.' : fallback;
+}
+
+function hasSubstantiveImpactText(text: string): boolean {
+  return /\b(killed|dead|deaths?|injured|missing|displaced|evacuat|affected|damage|destroyed|collapsed|washed away|crore|lakh|houses?|roads?|bridges?|power|relief|rescue|shelter|recovery|reconstruction)\b/i.test(text);
+}
+
+function buildEvidenceCoverage(bundle: Pick<EvidenceBundle,
+  'eventName' | 'eventDate' | 'dateRange' | 'location' | 'state' | 'sources' | 'whatHappened' |
+  'affectedAreas' | 'reportedCasualties' | 'humanImpact' | 'reportedDamage' | 'infrastructureDamage' |
+  'economicImpact' | 'governmentResponse' | 'rescueRelief' | 'recovery' | 'timeline'
+>): EvidenceCoverage {
+  const sourceText = bundle.sources.map((s) => `${s.title} ${s.summary}`).join(' ');
+  const distinctPublisherCount = new Set(bundle.sources.map(publisherKey)).size;
+  const eventConfirmed = bundle.sources.some((source) => scoreIncidentEvidence(source) >= 2);
+  const casualtyData = hasMeaningfulText(bundle.reportedCasualties) || /killed|dead|death|fatalit|injured|missing/i.test(sourceText);
+  const infrastructureDamage = hasMeaningfulText(bundle.infrastructureDamage) || /damage|destroyed|collapsed|washed away|houses?|roads?|bridges?|power|infrastructure/i.test(sourceText);
+  const economicImpact = hasMeaningfulText(bundle.economicImpact) || /(?:rs\.?|inr|crore|lakh|economic|loss|crop|agriculture)/i.test(sourceText);
+  const governmentResponse = hasMeaningfulText(bundle.governmentResponse) || /\bgovernment|ndrf|sdrf|army|navy|administration|evacuat/i.test(sourceText);
+  const rescueRelief = hasMeaningfulText(bundle.rescueRelief) || /\brescue|relief|shelter|food|medicine|camp/i.test(sourceText);
+  const recovery = hasMeaningfulText(bundle.recovery) || /\brecovery|reconstruction|rehabilitation|restoration|aftermath/i.test(sourceText);
+  const meaningfulTimelineEntries = (bundle.timeline || []).filter((step) =>
+    hasMeaningfulText(step.event) &&
+    hasMeaningfulText(step.description) &&
+    !/published|article|source|headline/i.test(`${step.event} ${step.description}`),
+  ).length;
+  const impactDimensions = [
+    casualtyData,
+    infrastructureDamage,
+    economicImpact,
+    governmentResponse,
+    rescueRelief,
+    recovery,
+    hasMeaningfulText(bundle.affectedAreas),
+  ].filter(Boolean).length;
+  const sourceRelevanceScore = bundle.sources.length
+    ? bundle.sources.reduce((sum, source) => sum + scoreIncidentEvidence(source), 0) / bundle.sources.length
+    : 0;
+  const evidenceDepthScore = impactDimensions + meaningfulTimelineEntries + (hasMeaningfulText(bundle.whatHappened) ? 1 : 0);
+  const overallQualityScore = sourceRelevanceScore + evidenceDepthScore + Math.min(distinctPublisherCount, 3);
+  const qualifies =
+    eventConfirmed &&
+    Boolean(bundle.eventDate || /\b(19\d\d|20\d\d)\b/.test(bundle.dateRange || bundle.eventName)) &&
+    bundle.location !== 'India' &&
+    hasMeaningfulText(bundle.whatHappened) &&
+    impactDimensions >= 1 &&
+    meaningfulTimelineEntries >= 1 &&
+    (bundle.sources.length >= 2 || (bundle.sources.length === 1 && sourceRelevanceScore >= 4 && impactDimensions >= 2));
+
+  return {
+    eventConfirmed,
+    eventNameConfidence: eventConfirmed ? 0.85 : 0.25,
+    relevantSourceCount: bundle.sources.length,
+    distinctPublisherCount,
+    overview: hasMeaningfulText(bundle.whatHappened),
+    eventDate: Boolean(bundle.eventDate || /\b(19\d\d|20\d\d)\b/.test(bundle.dateRange || bundle.eventName)),
+    location: bundle.location !== 'India',
+    affectedAreas: hasMeaningfulText(bundle.affectedAreas),
+    casualtyData,
+    injuryData: /\binjur/i.test(`${bundle.reportedCasualties} ${bundle.humanImpact} ${sourceText}`),
+    displacementData: /\bdisplaced|evacuat/i.test(`${bundle.humanImpact} ${sourceText}`),
+    infrastructureDamage,
+    economicImpact,
+    governmentResponse,
+    rescueRelief,
+    recovery,
+    meaningfulTimelineEntries,
+    sourceRelevanceScore,
+    evidenceDepthScore,
+    overallQualityScore,
+    qualifies,
+  };
+}
+
+function evidenceStatusFromCoverage(coverage: EvidenceCoverage): EvidenceBundle['evidenceStatus'] {
+  if (
+    coverage.qualifies &&
+    coverage.relevantSourceCount >= 4 &&
+    coverage.distinctPublisherCount >= 3 &&
+    coverage.meaningfulTimelineEntries >= 2 &&
+    coverage.evidenceDepthScore >= 5
+  ) return 'High Confidence';
+  if (coverage.qualifies && coverage.relevantSourceCount >= 2 && coverage.distinctPublisherCount >= 2) return 'Moderate Evidence';
+  return 'Limited Coverage';
+}
+
+function makeEvidenceTimeline(sources: CitedSource[], eventDate?: string): TimelineEvent[] {
+  const datePattern = /\b(?:\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+(?:19|20)\d{2}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2},?\s+(?:19|20)\d{2}|\d{4}-\d{2}-\d{2})\b/gi;
+  const steps: TimelineEvent[] = [];
+  const seen = new Set<string>();
+  for (const source of sources) {
+    const text = cleanEvidenceText(`${source.title}. ${source.summary}`);
+    const dates = Array.from(text.matchAll(datePattern)).map((match) => match[0]);
+    const selectedDate = dates[0] || (eventDate ? formatDisasterDate(eventDate) : '');
+    if (!selectedDate) continue;
+    const sentence = text.split(/(?<=[.!?])\s+/).find((part) => part.includes(dates[0] || '')) || text;
+    const title = sentence.slice(0, 72).replace(/\s+\S*$/, '').trim() || source.title;
+    const key = `${selectedDate}|${title.toLowerCase()}`;
+    if (seen.has(key) || /published|article/i.test(sentence)) continue;
+    seen.add(key);
+    steps.push({
+      date: selectedDate,
+      event: title,
+      description: `${sentence} [${source.id}]`,
+      citations: [source.id],
+    });
+  }
+  if (!steps.length && eventDate && sources[0]) {
+    steps.push({
+      date: formatDisasterDate(eventDate),
+      event: 'Documented disaster occurrence',
+      description: `${cleanEvidenceText(sources[0].summary || sources[0].title)} [${sources[0].id}]`,
+      citations: [sources[0].id],
+    });
+  }
+  return steps.slice(0, 6);
+}
+
 export async function buildHistoricalEvidenceBundle(
   userQuery: string,
   categoryFilter?: string,
   stateFilter?: string,
 ): Promise<EvidenceBundle> {
   const baseQuery = userQuery.trim();
+  let normalizedEvent = normalizeHistoricalEventQuery(baseQuery);
   const cacheKey = JSON.stringify({
     baseQuery: baseQuery.toLowerCase(),
+    normalizedQuery: normalizedEvent.normalizedQuery.toLowerCase(),
     categoryFilter: categoryFilter || '',
     stateFilter: stateFilter || '',
   });
@@ -500,82 +870,56 @@ export async function buildHistoricalEvidenceBundle(
     return cached.bundle;
   }
 
-  let searchQueries = Array.from(
-    new Set(
-      [
-        baseQuery,
-        `${baseQuery} India`,
-        `${baseQuery} India disaster`,
-        `${baseQuery} casualties damage`,
-        `${baseQuery} evacuation rescue relief`,
-        categoryFilter ? `${baseQuery} ${categoryFilter} India` : '',
-        stateFilter ? `${baseQuery} ${stateFilter} India` : '',
-      ].filter(Boolean),
-    ),
-  );
+  let searchQueries = buildHistoricalResearchQueries(normalizedEvent, categoryFilter, stateFilter);
 
   const allArticles: NewsArticle[] = [];
   for (const q of searchQueries) {
-    const res = await searchGoogleNews(q, { isCurrentNews: false, maxResults: 4 });
+    const res = await searchGoogleNews(q, { isCurrentNews: false, maxResults: 6 });
     allArticles.push(...res);
   }
-  let eventFilterQuery = baseQuery;
+  let eventFilterQuery = normalizedEvent.normalizedQuery;
 
-  if (!allArticles.length) {
+  if (allArticles.length < 2) {
     const normalizedQuery = await normalizeDisasterSearchQuery(baseQuery);
     if (normalizedQuery) {
+      normalizedEvent = normalizeHistoricalEventQuery(normalizedQuery);
       eventFilterQuery = normalizedQuery;
-      searchQueries = Array.from(new Set([
-        ...searchQueries,
-        normalizedQuery,
-        `${normalizedQuery} India`,
-        `${normalizedQuery} India disaster`,
-        `${normalizedQuery} casualties damage`,
-      ]));
-      for (const q of searchQueries.slice(-4)) {
-        const res = await searchGoogleNews(q, { isCurrentNews: false, maxResults: 4 });
+      const expandedQueries = buildHistoricalResearchQueries(normalizedEvent, categoryFilter, stateFilter);
+      searchQueries = Array.from(new Set([...searchQueries, ...expandedQueries]));
+      for (const q of expandedQueries) {
+        const res = await searchGoogleNews(q, { isCurrentNews: false, maxResults: 6 });
         allArticles.push(...res);
       }
     }
   }
 
-  const uniqueArticlesMap = new Map<string, NewsArticle>();
-  for (const art of allArticles) {
-    const key = art.title.toLowerCase().trim();
-    if (!uniqueArticlesMap.has(key)) {
-      uniqueArticlesMap.set(key, art);
-    }
-  }
-
-  const incidentArticles = filterIncidentEvidenceArticles(Array.from(uniqueArticlesMap.values()));
+  const incidentArticles = filterIncidentEvidenceArticles(deduplicateNewsArticles(allArticles));
   let sourcesList = filterSourcesForEvent(incidentArticles, {
     eventName: eventFilterQuery,
-    disasterType: categoryFilter || inferDisasterType(baseQuery),
-    state: stateFilter || inferState(baseQuery),
-    approxDate: eventFilterQuery,
-  }).slice(0, 6);
+    disasterType: categoryFilter || normalizedEvent.disasterType || inferDisasterType(baseQuery),
+    state: stateFilter || normalizedEvent.state || inferState(baseQuery),
+    approxDate: normalizedEvent.eventDate || String(normalizedEvent.year || eventFilterQuery),
+  })
+    .sort((a, b) => scoreIncidentEvidence(b) - scoreIncidentEvidence(a))
+    .slice(0, 10);
   if (!sourcesList.length) {
     const normalizedQuery = await normalizeDisasterSearchQuery(baseQuery);
     if (normalizedQuery) {
-      eventFilterQuery = normalizedQuery;
+      normalizedEvent = normalizeHistoricalEventQuery(normalizedQuery);
+      eventFilterQuery = normalizedEvent.normalizedQuery;
       const correctedArticles: NewsArticle[] = [];
-      const correctedQueries = [
-        normalizedQuery,
-        `${normalizedQuery} India disaster`,
-        `${normalizedQuery} casualties damage`,
-        `${normalizedQuery} evacuation rescue relief`,
-      ];
+      const correctedQueries = buildHistoricalResearchQueries(normalizedEvent, categoryFilter, stateFilter);
       for (const q of correctedQueries) {
-        const res = await searchGoogleNews(q, { isCurrentNews: false, maxResults: 4 });
+        const res = await searchGoogleNews(q, { isCurrentNews: false, maxResults: 6 });
         correctedArticles.push(...res);
       }
       searchQueries = Array.from(new Set([...searchQueries, ...correctedQueries]));
       sourcesList = filterSourcesForEvent(filterIncidentEvidenceArticles(correctedArticles), {
-        eventName: normalizedQuery,
-        disasterType: categoryFilter || inferDisasterType(normalizedQuery),
-        state: stateFilter || inferState(normalizedQuery),
-        approxDate: normalizedQuery,
-      }).slice(0, 6);
+        eventName: normalizedEvent.normalizedQuery,
+        disasterType: categoryFilter || normalizedEvent.disasterType || inferDisasterType(normalizedQuery),
+        state: stateFilter || normalizedEvent.state || inferState(normalizedQuery),
+        approxDate: normalizedEvent.eventDate || String(normalizedEvent.year || normalizedQuery),
+      }).slice(0, 10);
     }
   }
   if (!sourcesList.length) {
@@ -584,12 +928,12 @@ export async function buildHistoricalEvidenceBundle(
 
   const citedSources: CitedSource[] = sourcesList.map((art, idx) => ({
     id: `S${idx + 1}`,
-    title: art.title,
+    title: cleanEvidenceText(art.title),
     publisher: art.publisher,
     publishedAt: art.publishedAt,
     url: art.url,
-    summary: art.summary,
-    qualityScore: 90 - idx * 5,
+    summary: cleanEvidenceText(art.summary),
+    qualityScore: Math.max(20, 95 - idx * 4),
   }));
 
   const sourcesText = citedSources
@@ -607,9 +951,11 @@ Synthesize the provided disaster evidence strictly using the source documents la
 ABSOLUTE RULES:
 1. Every factual statement MUST cite its source using [S1], [S2], etc.
 2. NEVER invent casualty numbers, dates, locations, or source IDs.
-3. If information is not provided in the sources, write "Information unavailable in the retrieved sources."
+3. If information is not provided in the sources, return an empty string for that field.
 4. If sources conflict on numbers/facts, prefer a compact range when the values cluster closely (for example, 23-25). If one value is a clear outlier, do not merge it into the range; report it separately in conflictingReports and explain the likely reason for the spread.
-5. Return JSON matching the requested schema.`;
+5. Do not use article publication dates as incident chronology or event dates.
+6. Timeline entries must describe disaster milestones, not source publication events.
+7. Return JSON matching the requested schema.`;
 
   const prompt = `User Query: "${baseQuery}"
 Category Filter: ${categoryFilter || 'None'}
@@ -645,7 +991,7 @@ Produce a structured historical evidence synthesis in JSON format:
   "timeline": [{"date": "Date string", "event": "Short title", "description": "Description with citations", "citations": ["S1"]}]
 }`;
 
-  const depthInstruction = `Write 3-5 substantive sentences per narrative section using all available facts across all sources and the extracted fact fragments. Do not output one-line placeholders when source material contains relevant facts for that section.`;
+  const depthInstruction = `Write substantive narrative only where the evidence supports it. Do not output one-line placeholders, generic response claims, or boilerplate when source material lacks facts for that section.`;
 
   let synthesizedData: any = null;
 
@@ -697,53 +1043,53 @@ Produce a structured historical evidence synthesis in JSON format:
     sources: (c.sources || []).filter((sId: string) => citedSources.some((s) => s.id === sId)),
     })),
   ];
-  const eventDate = coerceIsoDate(synthesizedData.eventDate || synthesizedData.dateRange)
+  const eventDate = normalizedEvent.eventDate
+    || coerceIsoDate(synthesizedData.eventDate || synthesizedData.dateRange)
     || coerceIsoDate([eventFilterQuery, ...candidateFacts.dates].join(' '));
+  const evidenceTimeline = makeEvidenceTimeline(citedSources, eventDate);
 
-  const bundle: EvidenceBundle = {
+  const draftBundle: EvidenceBundle = {
     id: `ev-${Date.now()}-${Math.random().toString(36).substring(7)}`,
-    eventName: synthesizedData.eventName || baseQuery,
-    disasterType: (synthesizedData.disasterType as DisasterCategory) || 'Cyclone',
-    location: synthesizedData.location || 'India',
-    state: synthesizedData.state || 'India',
+    eventName: synthesizedData.eventName || normalizedEvent.normalizedQuery || baseQuery,
+    disasterType: (synthesizedData.disasterType as DisasterCategory) || normalizedEvent.disasterType || inferDisasterType(eventFilterQuery),
+    location: synthesizedData.location || normalizedEvent.location || 'India',
+    state: synthesizedData.state || normalizedEvent.state || 'India',
     country: 'India',
     eventDate,
     dateRange: eventDate ? formatDisasterDate(eventDate) : synthesizedData.dateRange || 'Documented Occurrence',
     numericCasualtiesRange: buildNumericRangeObject(casualtyReconciliation),
-    reportedCasualties: reportedCasualties || 'Casualty figures documented in source reports.',
-    reportedDamage: reportedDamage || 'Infrastructure and sector damages documented in evidence.',
+    reportedCasualties: reportedCasualties || '',
+    reportedDamage: reportedDamage || extractBestFact(citedSources, 'damage'),
     sources: citedSources,
-    timeline: cleanTimeline.length > 0 ? cleanTimeline : [
-      {
-        date: 'Day 1',
-        event: 'Disaster Inception & Warning',
-        description: `Early warnings and alerts issued [${citedSources[0]?.id || 'S1'}].`,
-        citations: citedSources[0] ? [citedSources[0].id] : [],
-      },
-      {
-        date: 'Day 2',
-        event: 'Peak Impact',
-        description: `Peak impact recorded in media reports [${citedSources[1]?.id || citedSources[0]?.id || 'S1'}].`,
-        citations: citedSources[1] ? [citedSources[1].id] : [],
-      },
-    ],
+    timeline: cleanTimeline.length > 0 ? cleanTimeline : evidenceTimeline,
     whatHappened: whatHappened || `${citedSources[0].summary} [${citedSources[0].id}]`,
-    affectedAreas: affectedAreas || 'Districts and communities documented in source coverage.',
-    humanImpact: humanImpact || 'Displacement and community disruption documented in cited journalism.',
-    infrastructureDamage: infrastructureDamage || 'Electrical grid, highway corridors, and residential impacts reported.',
-    economicImpact: economicImpact || 'Monetary losses and agricultural impacts reported across regional sectors.',
-    governmentResponse: governmentResponse || 'State Disaster Management Authority and NDRF mobilization recorded.',
-    rescueRelief: rescueRelief || 'Shelter operations, dry food packets, and medical deployment.',
-    recovery: recovery || 'Long-term rehabilitation and infrastructure reconstruction initiatives.',
-    sourceAssessment: synthesizedData.sourceAssessment || `Retrieved ${citedSources.length} verified news and government records.`,
+    affectedAreas: affectedAreas || extractBestFact(citedSources, 'location'),
+    humanImpact: humanImpact || (casualtyRangeText ? `${casualtyRangeText} [${citedSources[0].id}]` : extractBestFact(citedSources, 'casualties')),
+    infrastructureDamage: infrastructureDamage || extractBestFact(citedSources, 'damage'),
+    economicImpact: economicImpact || '',
+    governmentResponse: governmentResponse || '',
+    rescueRelief: rescueRelief || '',
+    recovery: recovery || '',
+    sourceAssessment: synthesizedData.sourceAssessment || `Retrieved ${citedSources.length} relevant source${citedSources.length === 1 ? '' : 's'} from ${new Set(citedSources.map(publisherKey)).size} publisher${new Set(citedSources.map(publisherKey)).size === 1 ? '' : 's'}.`,
     conflictingReports: cleanConflicts,
     synthesizedAt: new Date().toISOString(),
-    evidenceStatus: citedSources.length >= 3 ? 'High Confidence' : 'Moderate Evidence',
+    evidenceStatus: 'Limited Coverage',
     retrievalMetadata: {
       queriesExecuted: searchQueries,
       rawSourcesCount: allArticles.length,
       dedupedSourcesCount: citedSources.length,
     },
+  };
+  const coverage = buildEvidenceCoverage(draftBundle);
+  if (!coverage.qualifies) {
+    throw new Error('Insufficient relevant historical evidence was retrieved to build a reliable dossier for this event.');
+  }
+  const bundle: EvidenceBundle = {
+    ...draftBundle,
+    evidenceStatus: evidenceStatusFromCoverage(coverage),
+    sourceAssessment: draftBundle.sourceAssessment
+      ? `${draftBundle.sourceAssessment} Coverage: ${coverage.relevantSourceCount} relevant source(s), ${coverage.distinctPublisherCount} distinct publisher(s), ${coverage.meaningfulTimelineEntries} incident timeline milestone(s).`
+      : '',
   };
 
   evidenceBundleCache.set(cacheKey, {
@@ -879,78 +1225,21 @@ function makeArchiveTimeline(sources: CitedSource[], eventDate?: string): Timeli
 }
 
 async function buildArchiveEvidenceBundle(query: string, index: number, seed?: EraDisasterSeed): Promise<HistoricalDisasterItem | null> {
-  const articles = await searchGoogleNews(query, { isCurrentNews: false, maxResults: 3 });
-  const incidentArticles = filterIncidentEvidenceArticles(articles);
-  const sourcesList = filterSourcesForEvent(incidentArticles, {
-    eventName: seed?.eventName || query,
-    disasterType: seed?.disasterType || inferDisasterType(query),
-    state: seed?.state || inferState(query),
-    approxDate: seed?.approxDate,
-  }).slice(0, 3);
-
-  if (!sourcesList.length && !seed) {
+  try {
+    const bundle = await buildHistoricalEvidenceBundle(
+      seed ? `${seed.eventName} ${seed.approxDate}` : query,
+      seed?.disasterType,
+      seed?.state,
+    );
+    return bundleToArchiveItem(bundle, index);
+  } catch (error) {
+    const message = (error as Error).message;
+    if (/no live google news sources|insufficient relevant historical evidence/i.test(message)) {
+      return null;
+    }
+    console.warn('Archive evidence research failed:', message);
     return null;
   }
-
-  const citedSources: CitedSource[] = sourcesList.map((art, idx) => ({
-    id: `S${idx + 1}`,
-    title: art.title,
-    publisher: art.publisher,
-    publishedAt: art.publishedAt,
-    url: art.url,
-    summary: art.summary,
-    qualityScore: 90 - idx * 5,
-  }));
-
-  const joinedText = [query, ...citedSources.map((s) => `${s.title} ${s.summary}`)].join(' ');
-  const disasterType = seed?.disasterType || inferDisasterType(joinedText);
-  const queryState = seed?.state || inferState(query);
-  const state = queryState !== 'India' ? queryState : inferState(joinedText);
-  const location = seed?.location || inferLocation(joinedText, state);
-  const topSource = citedSources[0];
-  const eventDate = coerceIsoDate(seed?.eventDate || seed?.approxDate || query);
-  const casualtyReconciliation = reconcileNumericClaims(extractCasualtyNumericClaims(citedSources));
-  const casualtyRangeText = formatCasualtyRange(casualtyReconciliation);
-  const sourceCitation = citedSources[0] ? ` [${citedSources[0].id}]` : '';
-
-  const bundle: EvidenceBundle = {
-    id: `ev-${Date.now()}-${Math.random().toString(36).substring(7)}`,
-    eventName: seed?.eventName || topSource?.title.replace(/^\d{4}\s*[-:]\s*/, '') || query,
-    disasterType,
-    location,
-    state,
-    country: 'India',
-    eventDate,
-    dateRange: eventDate ? formatDisasterDate(eventDate) : seed?.approxDate || 'Documented Occurrence',
-    numericCasualtiesRange: buildNumericRangeObject(casualtyReconciliation),
-    reportedCasualties: casualtyRangeText || 'Information unavailable in the retrieved sources.',
-    reportedDamage: 'Information unavailable in the retrieved sources.',
-    sources: citedSources,
-    timeline: makeArchiveTimeline(citedSources, eventDate),
-    whatHappened: citedSources.length
-      ? citedSources.map((s) => `${s.summary} [${s.id}]`).join(' ')
-      : `${seed?.eventName || query} is a model-sourced historical Indian disaster seed for ${location}, ${state}. External Google News citations were sparse for this era.`,
-    affectedAreas: `Coverage indicates ${state} and nearby affected districts were discussed${sourceCitation}.`,
-    humanImpact: citedSources.length ? 'Human impact details were referenced in the retrieved source coverage.' : 'Human impact details require external archival corroboration.',
-    infrastructureDamage: 'Infrastructure damage details were not clearly quantified in the retrieved source coverage.',
-    economicImpact: 'Economic impact figures were not clearly quantified in the retrieved source coverage.',
-    governmentResponse: 'Official response details were summarized in the retrieved source coverage.',
-    rescueRelief: 'Rescue and relief information was referenced in the retrieved source coverage.',
-    recovery: 'Recovery details were not clearly quantified in the retrieved source coverage.',
-    sourceAssessment: citedSources.length
-      ? `Synthesized from ${citedSources.length} live news sources indexed for the archive.`
-      : 'Model-Sourced / Limited External Citation: Google News RSS returned sparse or no archival citations for this era; event metadata comes from the era discovery model prompt.',
-    conflictingReports: buildNumericConflictReports(casualtyReconciliation),
-    synthesizedAt: new Date().toISOString(),
-    evidenceStatus: citedSources.length >= 2 ? 'High Confidence' : citedSources.length ? 'Moderate Evidence' : 'Model-Sourced / Limited External Citation',
-    retrievalMetadata: {
-      queriesExecuted: [query],
-      rawSourcesCount: articles.length,
-      dedupedSourcesCount: citedSources.length,
-    },
-  };
-
-  return bundleToArchiveItem(bundle, index);
 }
 
 export async function discoverEraDisasters(params: {
@@ -1258,37 +1547,35 @@ function buildDeterministicFallbackSynthesis(query: string, sources: CitedSource
   let type: DisasterCategory = 'General Alert';
   if (qLower.includes('cyclon') || qLower.includes('fani') || qLower.includes('amphan')) type = 'Cyclone';
   else if (qLower.includes('flood') || qLower.includes('kerala')) type = 'Flood';
-  else if (qLower.includes('earthquake')) type = 'Earthquake';
+  else if (qLower.includes('earthquake') || qLower.includes('quake')) type = 'Earthquake';
   else if (qLower.includes('landslide')) type = 'Landslide';
 
-  const s1 = sources[0] ? `[${sources[0].id}]` : '';
-  const s2 = sources[1] ? `[${sources[1].id}]` : s1;
+  const facts = extractCandidateFacts(sources);
+  const sourceSummary = sources.length
+    ? sources.slice(0, 3).map((s) => `${cleanEvidenceText(s.summary || s.title)} [${s.id}]`).join(' ')
+    : '';
 
   return {
     eventName: query,
     disasterType: type,
-    location: 'India',
-    state: 'India',
+    location: inferLocation(query, inferState(query)),
+    state: inferState(query),
     country: 'India',
-    dateRange: 'Historical Record',
-    reportedCasualties: `Casualties recorded in official state bulletins ${s1}.`,
-    reportedDamage: `Large scale infrastructure disruption documented ${s2}.`,
-    whatHappened: sources.map((s) => `${s.summary} [${s.id}]`).join(' '),
-    affectedAreas: `Districts specified in retrieved coverage ${s1}.`,
-    humanImpact: `Evacuation and relief measures mobilized across shelters ${s1}.`,
-    infrastructureDamage: `Telecommunications, road connectivity, and power transmission line damages ${s2}.`,
-    economicImpact: `Economic assessment conducted by respective state disaster management departments ${s1}.`,
-    governmentResponse: `NDMA and SDRF pre-positioned personnel in vulnerable zones ${s1}.`,
-    rescueRelief: `Distribution of relief supplies, clean drinking water, and medical aid ${s2}.`,
-    recovery: `Restoration of utility services and rehabilitation programs ${s1}.`,
-    sourceAssessment: `Synthesized from ${sources.length} indexed media reports.`,
+    dateRange: coerceIsoDate(query) ? formatDisasterDate(coerceIsoDate(query)!) : 'Documented Occurrence',
+    eventDate: coerceIsoDate(query),
+    reportedCasualties: '',
+    reportedDamage: facts.damage?.slice(0, 3).join('; ') || '',
+    whatHappened: sourceSummary,
+    affectedAreas: facts.location?.slice(0, 3).join('; ') || '',
+    humanImpact: facts.casualties?.slice(0, 3).join('; ') || '',
+    infrastructureDamage: facts.damage?.slice(0, 3).join('; ') || '',
+    economicImpact: '',
+    governmentResponse: facts.response?.slice(0, 3).join('; ') || '',
+    rescueRelief: facts.response?.slice(0, 3).join('; ') || '',
+    recovery: '',
+    sourceAssessment: sources.length ? `Retrieved ${sources.length} source(s); automated synthesis was unavailable, so only extracted source fragments are shown.` : '',
     conflictingReports: [],
-    timeline: sources.map((s, i) => ({
-      date: `Phase ${i + 1}`,
-      event: s.title.slice(0, 40) + '...',
-      description: `${s.summary} [${s.id}]`,
-      citations: [s.id],
-    })),
+    timeline: makeEvidenceTimeline(sources, coerceIsoDate(query)),
   };
 }
 
@@ -1405,16 +1692,72 @@ export async function chatResearchAssistant(params: {
 
   if (associatedBundle) {
     evidenceSources = associatedBundle.sources;
+    const associatedEvent = normalizeHistoricalEventQuery(`${associatedBundle.eventName} ${associatedBundle.eventDate || associatedBundle.dateRange}`);
+    const targetedQueries = buildHistoricalResearchQueries(associatedEvent, associatedBundle.disasterType, associatedBundle.state)
+      .filter((query) => {
+        const q = query.toLowerCase();
+        const msg = englishMessage.toLowerCase();
+        if (/death|died|killed|casualt|injur|missing/.test(msg)) return /casualt|death|injur|missing/.test(q);
+        if (/house|damage|loss|road|bridge|power|infrastructure|crop|economic/.test(msg)) return /damage|economic|houses|infrastructure/.test(q);
+        if (/rescue|relief|evacuat|government|response|ndrf|sdrf/.test(msg)) return /rescue|relief|evacuat|government/.test(q);
+        if (/timeline|when|chronolog|after|before/.test(msg)) return /timeline|aftermath|history/.test(q);
+        return false;
+      })
+      .slice(0, 4);
+    if (targetedQueries.length) {
+      const extraArticles: NewsArticle[] = [];
+      for (const q of targetedQueries) {
+        extraArticles.push(...await searchGoogleNews(q, { isCurrentNews: false, maxResults: 4 }));
+      }
+      const extraSources = filterSourcesForEvent(filterIncidentEvidenceArticles(deduplicateNewsArticles(extraArticles)), {
+        eventName: associatedEvent.normalizedQuery,
+        disasterType: associatedBundle.disasterType,
+        state: associatedBundle.state,
+        approxDate: associatedBundle.eventDate || associatedBundle.dateRange,
+      }).slice(0, 4).map((art, idx) => ({
+        id: `S${evidenceSources.length + idx + 1}`,
+        title: cleanEvidenceText(art.title),
+        publisher: art.publisher,
+        publishedAt: art.publishedAt,
+        url: art.url,
+        summary: cleanEvidenceText(art.summary),
+      }));
+      evidenceSources = deduplicateNewsArticles([...evidenceSources, ...extraSources] as any).map((source: any, idx) => ({
+        ...source,
+        id: `S${idx + 1}`,
+      }));
+    }
     contextText = `Associated Event: ${associatedBundle.eventName} (${associatedBundle.disasterType}, ${associatedBundle.location})\n` +
       `Summary: ${associatedBundle.whatHappened}\nImpact: ${associatedBundle.humanImpact}\nDamage: ${associatedBundle.infrastructureDamage}\n` +
       `Sources:\n` +
       evidenceSources.map((s: CitedSource) => `[${s.id}] ${s.title} (${s.publisher}): ${s.summary}`).join('\n');
   } else {
-    let articles = await searchGoogleNews(englishMessage, { isCurrentNews: false, maxResults: 4 });
-    if (!articles.length) {
+    const normalizedEvent = normalizeHistoricalEventQuery(englishMessage);
+    const chatQueries = buildHistoricalResearchQueries(normalizedEvent).slice(0, 8);
+    let articles: NewsArticle[] = [];
+    for (const q of chatQueries) {
+      articles.push(...await searchGoogleNews(q, { isCurrentNews: false, maxResults: 4 }));
+    }
+    articles = filterSourcesForEvent(filterIncidentEvidenceArticles(deduplicateNewsArticles(articles)), {
+      eventName: normalizedEvent.normalizedQuery,
+      disasterType: normalizedEvent.disasterType,
+      state: normalizedEvent.state,
+      approxDate: normalizedEvent.eventDate || String(normalizedEvent.year || ''),
+    }).slice(0, 8);
+    if (articles.length < 2) {
       const normalizedQuery = await normalizeDisasterSearchQuery(englishMessage);
       if (normalizedQuery) {
-        articles = await searchGoogleNews(normalizedQuery, { isCurrentNews: false, maxResults: 4 });
+        const fallbackEvent = normalizeHistoricalEventQuery(normalizedQuery);
+        const fallbackArticles: NewsArticle[] = [];
+        for (const q of buildHistoricalResearchQueries(fallbackEvent).slice(0, 8)) {
+          fallbackArticles.push(...await searchGoogleNews(q, { isCurrentNews: false, maxResults: 4 }));
+        }
+        articles = filterSourcesForEvent(filterIncidentEvidenceArticles(deduplicateNewsArticles([...articles, ...fallbackArticles])), {
+          eventName: fallbackEvent.normalizedQuery,
+          disasterType: fallbackEvent.disasterType,
+          state: fallbackEvent.state,
+          approxDate: fallbackEvent.eventDate || String(fallbackEvent.year || ''),
+        }).slice(0, 8);
       }
     }
     evidenceSources = articles.map((art, idx) => ({
@@ -1438,12 +1781,13 @@ export async function chatResearchAssistant(params: {
 Your goal is to answer queries strictly grounded in retrieved evidence.
 RULES:
 1. Support factual claims with citations [S1], [S2], etc.
-2. If facts are not in the sources, say "Information unavailable in the retrieved sources."
+2. If facts are not in the sources after checking titles and summaries, say exactly which detail could not be established from the retrieved evidence.
 3. Check spelling and grammar before responding. Output only clean professional text in the requested language.
 4. Use concise Markdown: short paragraphs and bullet lists. Use tables only for truly tabular comparisons.
 5. Do not emit raw HTML entities such as &nbsp;.
 6. Avoid boilerplate disclaimers unless the evidence is genuinely missing.
-7. ${langInstruction}`;
+7. Use ASCII citation brackets only, such as [S1], never fullwidth citation brackets.
+8. ${langInstruction}`;
 
   const prompt = `Conversation Context:
 ${history.slice(-4).map((h) => `${h.role === 'user' ? 'User' : 'Assistant'}: ${h.content}`).join('\n')}
@@ -1463,9 +1807,9 @@ Provide a professional, cited research answer:`;
 
   if (!reply) {
     reply = evidenceSources.length > 0
-      ? `Based on retrieved historical records:\n\n` +
+      ? `## Answer\n\nBased on retrieved historical records:\n\n` +
         evidenceSources.map((s) => `* **${s.title}** (${s.publisher}): ${s.summary} [${s.id}]`).join('\n\n')
-      : `Information unavailable in the retrieved sources for this query.`;
+      : `## Answer\n\nNo sufficiently relevant historical evidence was retrieved for this query after typo and alias normalization.`;
   }
 
   reply = sanitizeGeneratedReply(validateAndCleanCitations(reply, evidenceSources));
