@@ -25,6 +25,7 @@ import {
 import type { CitedSource, EvidenceBundle } from '../../types/disaster';
 import { INDIAN_LANGUAGES, getTranslation, translate } from '../../types/language';
 import { AudioRecorderButton } from '../common/AudioRecorderButton';
+import { ChatSkeleton } from '../common/Skeletons';
 import { apiUrl } from '../../lib/api';
 import { createChatRuntime } from '../../lib/chatRuntime';
 
@@ -160,6 +161,8 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [inputLanguage, setInputLanguage] = useState(language);
+  const [isAssistantRunning, setIsAssistantRunning] = useState(false);
+  const [runningStageIndex, setRunningStageIndex] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const playbackTokenRef = useRef(0);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -182,10 +185,24 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
     setMessages((current) => current.length === 0 || current.every((message) => message.id === 'm-welcome') ? [welcomeMessage] : current);
   }, [messages.length, welcomeMessage]);
 
+  const runningStages = ['Understanding question...', 'Searching evidence...', 'Reconciling sources...', 'Generating answer...'];
+
+  useEffect(() => {
+    if (!isAssistantRunning) {
+      setRunningStageIndex(0);
+      return;
+    }
+    const interval = window.setInterval(() => {
+      setRunningStageIndex((idx) => Math.min(idx + 1, runningStages.length - 1));
+    }, 1400);
+    return () => window.clearInterval(interval);
+  }, [isAssistantRunning, runningStages.length]);
+
   const adapter = useMemo(() => createChatRuntime(language, associatedBundle, {
     messages,
     historyRef: englishHistoryRef,
     onMessagesChange: setMessages,
+    onRunningChange: setIsAssistantRunning,
     inputLanguage,
   }), [language, associatedBundle, messages, inputLanguage]);
   const runtime = useExternalStoreRuntime(adapter);
@@ -260,7 +277,13 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
           <ThreadPrimitive.Viewport autoScroll className="flex-1 overflow-y-auto p-4 space-y-4">
             <ThreadPrimitive.Messages components={{ Message: () => <MessageBubble language={language} isPlayingAudio={isPlayingAudio} onPlayTTS={playTTS} /> }} />
             <ThreadPrimitive.If running>
-              <div className="flex items-center gap-2 text-xs text-indigo-600 px-2"><Loader2 className="w-3.5 h-3.5 animate-spin" />{translate(language, 'assistant.pipeline')}</div>
+              <div className="space-y-2 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-3">
+                <div className="flex items-center gap-2 text-xs font-semibold text-indigo-700 px-1">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>{runningStages[runningStageIndex] || translate(language, 'assistant.pipeline')}</span>
+                </div>
+                <ChatSkeleton />
+              </div>
             </ThreadPrimitive.If>
           </ThreadPrimitive.Viewport>
           <div className="p-3 sm:p-4 border-t border-slate-200 bg-slate-50 space-y-2">

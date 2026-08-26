@@ -83,7 +83,7 @@ export const EventDetailView: React.FC<EventDetailViewProps> = ({
 
   const isMeaningfulText = (text?: string | null) => {
     if (!text) return false;
-    const normalized = text.trim().toLowerCase();
+    const normalized = text.replace(/&nbsp;/gi, ' ').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
     if (!normalized) return false;
     const placeholders = [
       'information unavailable',
@@ -100,6 +100,7 @@ export const EventDetailView: React.FC<EventDetailViewProps> = ({
       'coverage indicates',
       'not available',
     ];
+    if (/^\s*(?:\[(?:S\d+)\]\s*)+$/i.test(normalized)) return false;
     return !placeholders.some((phrase) => normalized.includes(phrase));
   };
 
@@ -164,6 +165,21 @@ export const EventDetailView: React.FC<EventDetailViewProps> = ({
   };
 
   const hasSourceAssessment = isMeaningfulText(bundle.sourceAssessment);
+  const meaningfulTimeline = (bundle.timeline || []).filter((step) =>
+    isMeaningfulText(step.description) &&
+    !/published|article|source headline/i.test(`${step.event} ${step.description}`.toLowerCase()),
+  );
+  const keyMetrics = [
+    isMeaningfulText(bundle.reportedCasualties)
+      ? { label: 'Reported Casualties', value: bundle.reportedCasualties, icon: Users, color: 'text-rose-600' }
+      : null,
+    isMeaningfulText(bundle.reportedDamage)
+      ? { label: 'Damage / Loss', value: bundle.reportedDamage, icon: Building, color: 'text-amber-600' }
+      : null,
+    isMeaningfulText(bundle.affectedAreas)
+      ? { label: 'Areas Affected', value: bundle.affectedAreas, icon: MapPin, color: 'text-indigo-600' }
+      : null,
+  ].filter(Boolean) as Array<{ label: string; value: string; icon: React.FC<{ className?: string }>; color: string }>;
   const meaningfulConflicts = (bundle.conflictingReports || []).filter((conflict) =>
     isMeaningfulText(conflict.topic) && isMeaningfulText(conflict.details),
   );
@@ -285,6 +301,23 @@ export const EventDetailView: React.FC<EventDetailViewProps> = ({
 
       {/* 12 Detailed Evidence Sections Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        {keyMetrics.length > 0 && (
+          <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {keyMetrics.map((metric) => {
+              const Icon = metric.icon;
+              return (
+                <div key={metric.label} className="p-4 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-1.5">
+                  <div className="flex items-center gap-2 text-[11px] font-bold uppercase text-slate-500">
+                    <Icon className={`w-4 h-4 ${metric.color}`} />
+                    <span>{metric.label}</span>
+                  </div>
+                  <p className="text-xs text-slate-700 leading-relaxed line-clamp-3">{renderWithCitations(metric.value)}</p>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         {isMeaningfulText(bundle.whatHappened) && (
           <div className="md:col-span-2 p-5 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-2">
             <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
@@ -297,26 +330,28 @@ export const EventDetailView: React.FC<EventDetailViewProps> = ({
           </div>
         )}
 
-        <div className="md:col-span-2 p-5 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-4">
-          <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
-            <Clock className="w-4 h-4 text-indigo-600" />
-            <span>Chronological Incident Timeline</span>
-          </h3>
-          <div className="relative pl-6 space-y-4 before:absolute before:left-2 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
-            {bundle.timeline.map((step, idx) => (
-              <div key={idx} className="relative space-y-1">
-                <span className="absolute -left-6 top-1 w-2.5 h-2.5 rounded-full bg-indigo-600 ring-4 ring-white"></span>
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-xs font-bold text-indigo-600">{step.date}</span>
-                  <h5 className="font-bold text-xs text-slate-900">{step.event}</h5>
+        {meaningfulTimeline.length > 0 && (
+          <div className="md:col-span-2 p-5 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-4">
+            <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
+              <Clock className="w-4 h-4 text-indigo-600" />
+              <span>Chronological Incident Timeline</span>
+            </h3>
+            <div className="relative pl-6 space-y-4 before:absolute before:left-2 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
+              {meaningfulTimeline.map((step, idx) => (
+                <div key={idx} className="relative space-y-1">
+                  <span className="absolute -left-6 top-1 w-2.5 h-2.5 rounded-full bg-indigo-600 ring-4 ring-white"></span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-xs font-bold text-indigo-600">{step.date}</span>
+                    <h5 className="font-bold text-xs text-slate-900">{step.event}</h5>
+                  </div>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    {renderWithCitations(step.description)}
+                  </p>
                 </div>
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  {renderWithCitations(step.description)}
-                </p>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
         {isMeaningfulText(bundle.affectedAreas) && (
           <div className="p-5 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-2">

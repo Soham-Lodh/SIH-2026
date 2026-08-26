@@ -4,6 +4,8 @@ export interface NumericClaim {
   value: number;
   sourceId?: string;
   text: string;
+  metric?: 'deaths' | 'injured' | 'missing' | 'displaced' | 'evacuated' | 'rescued' | 'affected';
+  qualifier?: 'at least' | 'more than' | 'over' | 'around' | 'nearly' | 'reported';
 }
 
 export interface NumericReconciliationResult {
@@ -29,8 +31,13 @@ export function validateAndCleanCitations(text: string, validSources: CitedSourc
   if (!text) return '';
   const validIds = new Set(validSources.map((s) => s.id.toUpperCase().trim()));
 
+  const normalizedText = text
+    .replace(/ã€\s*(S\d+)\s*ã€‘/gi, '[$1]')
+    .replace(/【\s*(S\d+)\s*】/gi, '[$1]')
+    .replace(/［\s*(S\d+)\s*］/gi, '[$1]');
+
   // Replace citation markers like [S1], [S2][S4], [S7]
-  return text.replace(/\[(S\d+)\]/gi, (match, citationId) => {
+  return normalizedText.replace(/\[(S\d+)\]/gi, (match, citationId) => {
     const upperId = citationId.toUpperCase().trim();
     if (validIds.has(upperId)) {
       return `[${upperId}]`;
@@ -150,7 +157,7 @@ export function evaluateTemporalGate(
 }
 
 const casualtyContextPattern =
-  /\b(death|deaths|dead|killed|fatalit(?:y|ies)|casualt(?:y|ies)|missing|injured|injur(?:y|ies)|victims?)\b/i;
+  /\b(death|deaths|dead|killed|fatalit(?:y|ies)|casualt(?:y|ies)|missing|injured|injur(?:y|ies)|victims?|displaced|evacuat(?:ed|ion)|rescued?|affected)\b/i;
 const numericPattern = /\b\d{1,3}(?:,\d{2,3})*(?:\.\d+)?\b/g;
 
 function normalizeNumericClaim(raw: string): number | null {
@@ -172,17 +179,36 @@ export function extractCasualtyNumericClaims(sources: Array<Pick<CitedSource, 'i
     const matches = Array.from(text.matchAll(numericPattern));
 
     for (const match of matches) {
-      const start = Math.max(0, (match.index || 0) - 48);
-      const end = Math.min(text.length, (match.index || 0) + match[0].length + 48);
+      const start = Math.max(0, (match.index || 0) - 120);
+      const end = Math.min(text.length, (match.index || 0) + match[0].length + 120);
       const context = text.slice(start, end);
       if (!casualtyContextPattern.test(context)) continue;
 
       const value = normalizeNumericClaim(match[0]);
       if (value === null) continue;
+      const lowerContext = context.toLowerCase();
+      const metric: NumericClaim['metric'] =
+        /\b(killed|dead|deaths?|fatalit)/i.test(lowerContext) ? 'deaths'
+          : /\binjur/i.test(lowerContext) ? 'injured'
+            : /\bmissing\b/i.test(lowerContext) ? 'missing'
+              : /\bdisplaced\b/i.test(lowerContext) ? 'displaced'
+                : /\bevacuat/i.test(lowerContext) ? 'evacuated'
+                  : /\brescu/i.test(lowerContext) ? 'rescued'
+                    : /\baffected\b/i.test(lowerContext) ? 'affected'
+                      : undefined;
+      const qualifier: NumericClaim['qualifier'] =
+        /\bat least\b/i.test(lowerContext) ? 'at least'
+          : /\bmore than\b/i.test(lowerContext) ? 'more than'
+            : /\bover\b/i.test(lowerContext) ? 'over'
+              : /\baround\b/i.test(lowerContext) ? 'around'
+                : /\bnearly\b/i.test(lowerContext) ? 'nearly'
+                  : 'reported';
       claims.push({
         value,
         sourceId: source.id,
         text: context.replace(/\s+/g, ' ').trim(),
+        metric,
+        qualifier,
       });
     }
   }
@@ -243,19 +269,25 @@ export function reconcileNumericClaims(values: number[] | NumericClaim[]): Numer
 }
 
 const incidentEvidencePattern =
-  /\b(killed|dead|deaths?|fatalit(?:y|ies)|injured|missing|evacuat(?:ed|ion)|rescued?|relief|shelter|ndrf|sdrf|damage(?:d)?|collapsed?|washed away|inundat(?:ed|ion)|landslide|flood(?:ed)?|cyclone|earthquake|heatwave|heat wave|district|village|rainfall|warning issued)\b/i;
+  /\b(killed|dead|deaths?|fatalit(?:y|ies)|injured|missing|evacuat(?:ed|ion)|rescued?|relief|shelter|ndrf|sdrf|damage(?:d)?|collapsed?|washed away|inundat(?:ed|ion)|landslide|flood(?:ed)?|cyclone|earthquake|quake|seismic|heatwave|heat wave|district|village|rainfall|warning issued)\b/i;
 const hardIncidentPattern =
-  /\b(killed|dead|deaths?|fatalit(?:y|ies)|injured|missing|evacuat(?:ed|ion)|rescued?|relief|shelter|ndrf|sdrf|damage(?:d)?|collapsed?|washed away|inundat(?:ed|ion)|district|village)\b/i;
+  /\b(killed|dead|deaths?|fatalit(?:y|ies)|injured|missing|evacuat(?:ed|ion)|rescued?|relief|shelter|ndrf|sdrf|damage(?:d)?|collapsed?|washed away|inundat(?:ed|ion)|district|village|quake|earthquake)\b/i;
 const techAnnouncementPattern =
   /\b(new\s+(?:app|model|ai|system|tech|device|drone|sensor)\s+(?:to\s+|that\s+|for\s+)?(?:predict|counter|detect|prevent|warn)|launch(?:es|ed)?|unveils?|startup|funding|raises?\s+\$|partnership|research paper|study finds)\b/i;
+const passingMentionPattern =
+  /\b(astrologer|actor|film|celebrity|arrest(?:ed)?|politic(?:al|ian)|election|court|interview|opinion|column)\b/i;
+const impactFactPattern =
+  /\b(killed|dead|deaths?|fatalit(?:y|ies)|injured|missing|evacuat(?:ed|ion)|rescued?|relief|shelter|ndrf|sdrf|damage(?:d)?|collapsed?|washed away|inundat(?:ed|ion)|district|village|houses?|roads?|bridges?|power|economic|loss|crore)\b/i;
 
 export function scoreIncidentEvidence(article: Pick<NewsArticle, 'title' | 'summary'>): number {
   const text = `${article.title || ''}. ${article.summary || ''}`;
-  let score = 0;
   const matches = text.match(new RegExp(incidentEvidencePattern.source, 'gi'));
-  score += matches ? Math.min(matches.length, 5) : 0;
+  const keywordScore = matches ? Math.min(matches.length, 5) : 0;
+  if (keywordScore === 0) return 0;
+  let score = keywordScore;
   if (/\b(19|20)\d{2}\b/.test(text)) score += 1;
   if (techAnnouncementPattern.test(text) && !hardIncidentPattern.test(text)) return 0;
+  if (passingMentionPattern.test(text) && !impactFactPattern.test(text)) return 0;
   return score;
 }
 
