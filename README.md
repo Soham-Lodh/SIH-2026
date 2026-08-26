@@ -6,7 +6,7 @@
 
 ## The problem
 
-During an emergency, citizens and responders often need to reconcile a live official alert, its geographic relevance, protective guidance, and fragmented news coverage. Information may be difficult to interpret quickly and harder still to use in a preferred Indian language.
+During an emergency, citizens and responders often need to reconcile a live official alert, its geographic relevance, protective guidance, and fragmented news coverage. Information may be difficult to interpret quickly and harder still to use in a preferred Indian language .
 
 ## The solution
 
