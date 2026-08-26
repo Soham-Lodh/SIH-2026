@@ -636,20 +636,6 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
                     type="button"
                     onClick={() => {
                       setIsDownloadOpen(false);
-                      alert('CSV export can be wired back in if you want the live report file next.');
-                    }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-left rounded-xl hover:bg-slate-50 text-slate-700 font-medium transition-colors"
-                  >
-                    <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <div>
-                      <div className="font-semibold text-slate-900">CSV</div>
-                      <div className="text-[10px] text-slate-500">Live dossier export</div>
-                    </div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsDownloadOpen(false);
                       window.print();
                     }}
                     className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-left rounded-xl hover:bg-slate-50 text-slate-700 font-medium transition-colors"
