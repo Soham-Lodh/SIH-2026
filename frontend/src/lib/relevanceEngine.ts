@@ -8,6 +8,7 @@ import {
   EvacuationGuidance,
   EmergencyContact,
 } from '../types/disaster';
+import { formatDisasterDate } from './dateFormat';
 
 // Category-specific geographic relevance buffer thresholds in Kilometers
 export const CATEGORY_DISTANCE_THRESHOLDS: Record<DisasterCategory | string, number> = {
@@ -375,7 +376,7 @@ export function generatePlainLanguageSummary(alert: SachetAlert): string {
         timeStr =
           exp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) +
           ' on ' +
-          exp.toLocaleDateString([], { month: 'short', day: 'numeric' });
+          formatDisasterDate(alert.expires);
       }
     } catch {
       timeStr = alert.expires;

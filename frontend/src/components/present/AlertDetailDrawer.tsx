@@ -24,6 +24,7 @@ import {
 import { alertEnumLabel, getLocale, getTranslation, translate } from '../../types/language';
 import { generateEvacuationGuidance } from '../../lib/relevanceEngine';
 import { useLocalizedPresentation } from '../../lib/localizedPresentation';
+import { formatDisasterDate } from '../../lib/dateFormat';
 
 interface AlertDetailDrawerProps {
   alert: SachetAlert | null;
@@ -200,14 +201,14 @@ export const AlertDetailDrawer: React.FC<AlertDetailDrawerProps> = ({
                 <span className="text-slate-500 text-[10px] uppercase font-bold">{translate(language, 'alerts.effectiveTime')}</span>
                 <div className="text-slate-700 font-mono text-[11px] mt-0.5">
                   {new Date(alert.effective).toLocaleTimeString(getLocale(language), { hour: '2-digit', minute: '2-digit' })},{' '}
-                  {new Date(alert.effective).toLocaleDateString(getLocale(language), { month: 'short', day: 'numeric' })}
+                  {formatDisasterDate(alert.effective)}
                 </div>
               </div>
               <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
                 <span className="text-slate-500 text-[10px] uppercase font-bold">{translate(language, 'alerts.expiryTime')}</span>
                 <div className="text-slate-700 font-mono text-[11px] mt-0.5">
                   {new Date(alert.expires).toLocaleTimeString(getLocale(language), { hour: '2-digit', minute: '2-digit' })},{' '}
-                  {new Date(alert.expires).toLocaleDateString(getLocale(language), { month: 'short', day: 'numeric' })}
+                  {formatDisasterDate(alert.expires)}
                 </div>
               </div>
               {alert.polygon && alert.polygon.coordinates && (

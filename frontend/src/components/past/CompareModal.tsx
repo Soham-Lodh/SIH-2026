@@ -4,6 +4,7 @@ import { X, Scale, Sparkles, Check, ExternalLink, ShieldAlert, ArrowRight } from
 import { getTranslation } from '../../types/language';
 import { apiUrl } from '../../lib/api';
 import { translateComparison } from '../../lib/googleTranslate';
+import { formatDisasterDate } from '../../lib/dateFormat';
 
 interface CompareModalProps {
   bundles: EvidenceBundle[];
@@ -112,7 +113,7 @@ export const CompareModal: React.FC<CompareModalProps> = ({
                       {bundles.map((bundle) => (
                         <th key={bundle.id} className="p-3.5 font-bold text-slate-900">
                           <div>{bundle.eventName}</div>
-                          <span className="text-[10px] text-slate-500 font-normal">{bundle.dateRange}</span>
+                          <span className="text-[10px] text-slate-500 font-normal">{bundle.eventDate ? formatDisasterDate(bundle.eventDate) : bundle.dateRange}</span>
                         </th>
                       ))}
                     </tr>
@@ -146,7 +147,7 @@ export const CompareModal: React.FC<CompareModalProps> = ({
                     <div className="flex items-center justify-between gap-2">
                       <div>
                         <h4 className="font-bold text-sm text-slate-900">{bundle.eventName}</h4>
-                        <p className="text-[11px] text-slate-500">{bundle.dateRange}</p>
+                        <p className="text-[11px] text-slate-500">{bundle.eventDate ? formatDisasterDate(bundle.eventDate) : bundle.dateRange}</p>
                       </div>
                       <span className="px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-100 text-[10px] font-bold font-mono">
                         {bundle.sources.length} Sources
@@ -171,7 +172,7 @@ export const CompareModal: React.FC<CompareModalProps> = ({
                                 <span className="font-semibold text-sm text-slate-900 truncate">{source.title}</span>
                               </div>
                               <p className="text-[11px] text-slate-500 mt-1">
-                                {source.publisher} • {new Date(source.publishedAt).toLocaleDateString()}
+                                {source.publisher} • {formatDisasterDate(source.publishedAt)}
                               </p>
                             </div>
                             <ExternalLink className="w-3.5 h-3.5 text-indigo-600 shrink-0" />

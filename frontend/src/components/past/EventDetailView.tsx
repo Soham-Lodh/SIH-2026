@@ -25,6 +25,7 @@ import {
 import { getTranslation } from '../../types/language';
 import { useTranslateBatch } from '../../hooks/useTranslateBatch';
 import { translateEvidenceBundle } from '../../lib/googleTranslate';
+import { formatDisasterDate } from '../../lib/dateFormat';
 
 interface EventDetailViewProps {
   bundle: EvidenceBundle;
@@ -258,7 +259,7 @@ export const EventDetailView: React.FC<EventDetailViewProps> = ({
           </span>
           <span className="text-xs text-slate-500 flex items-center gap-1 ml-auto">
             <Clock className="w-3.5 h-3.5" />
-            <span>Synthesized: {new Date(bundle.synthesizedAt).toLocaleDateString()}</span>
+            <span>Synthesized: {formatDisasterDate(bundle.synthesizedAt)}</span>
           </span>
         </div>
 
@@ -273,7 +274,7 @@ export const EventDetailView: React.FC<EventDetailViewProps> = ({
           </div>
           <div className="flex items-center gap-1.5">
             <Calendar className="w-4 h-4 text-indigo-600" />
-            <span>{bundle.dateRange}</span>
+            <span>{bundle.eventDate ? formatDisasterDate(bundle.eventDate) : bundle.dateRange}</span>
           </div>
           <div className="flex items-center gap-1.5">
             <FileCheck className="w-4 h-4 text-emerald-600" />
@@ -460,7 +461,7 @@ export const EventDetailView: React.FC<EventDetailViewProps> = ({
                 </div>
                 <div className="text-[11px] text-slate-500 flex items-center gap-3">
                   <span className="font-semibold text-slate-700">{source.publisher}</span>
-                  <span>Published: {new Date(source.publishedAt).toLocaleDateString()}</span>
+                  <span>Published: {formatDisasterDate(source.publishedAt)}</span>
                 </div>
                 <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed">
                   {source.summary}
