@@ -166,6 +166,13 @@ export interface ConflictingReport {
   sources: string[];
 }
 
+export interface NumericRange {
+  min: number;
+  max: number;
+  outliers?: number[];
+  outlierSources?: { value: number; sourceIds: string[] }[];
+}
+
 export interface EvidenceBundle {
   id: string;
   eventName: string;
@@ -173,7 +180,9 @@ export interface EvidenceBundle {
   location: string;
   state: string;
   country: string;
+  eventDate?: string;
   dateRange: string;
+  numericCasualtiesRange?: NumericRange;
   reportedCasualties: string;
   reportedDamage: string;
   sources: CitedSource[];
@@ -189,7 +198,7 @@ export interface EvidenceBundle {
   sourceAssessment: string;
   conflictingReports: ConflictingReport[];
   synthesizedAt: string;
-  evidenceStatus: 'High Confidence' | 'Moderate Evidence' | 'Limited Coverage';
+  evidenceStatus: 'High Confidence' | 'Moderate Evidence' | 'Limited Coverage' | 'Model-Sourced / Limited External Citation';
   retrievalMetadata: {
     queriesExecuted: string[];
     rawSourcesCount: number;

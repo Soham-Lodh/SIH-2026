@@ -7,6 +7,7 @@ import { EventCardSkeleton } from '../common/Skeletons';
 import { AudioRecorderButton } from '../common/AudioRecorderButton';
 import { HistoricalDisasterItem } from '../../data/historicalDisasters';
 import { apiUrl } from '../../lib/api';
+import { formatDisasterDate } from '../../lib/dateFormat';
 import { translateText } from '../../lib/googleTranslate';
 import { useTranslateContent } from '../../hooks/useTranslateContent';
 import {
@@ -119,12 +120,17 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
   const t = getTranslation(language);
 
   const deriveYear = (bundle: EvidenceBundle) => {
+    if (bundle.eventDate) {
+      const year = new Date(bundle.eventDate).getFullYear();
+      if (Number.isFinite(year)) return year;
+    }
     const match = bundle.dateRange?.match(/\b(19\d\d|20\d\d)\b/)?.[0];
     if (match) return parseInt(match, 10);
     return new Date(bundle.synthesizedAt).getFullYear();
   };
 
   const deriveCasualtyScore = (bundle: EvidenceBundle) => {
+    if (bundle.numericCasualtiesRange) return bundle.numericCasualtiesRange.max;
     const match = bundle.reportedCasualties?.match(/(\d[\d,]*)/);
     if (!match) return 0;
     return parseInt(match[1].replace(/,/g, ''), 10) || 0;
@@ -360,8 +366,13 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
     }
 
     result.sort((a, b) => {
-      if (sortOption === 'oldest') return a.year - b.year;
-      if (sortOption === 'recent') return b.year - a.year;
+      const aTime = a.eventDate ? new Date(a.eventDate).getTime() : NaN;
+      const bTime = b.eventDate ? new Date(b.eventDate).getTime() : NaN;
+      const chronological = Number.isFinite(aTime) && Number.isFinite(bTime) && aTime !== bTime
+        ? aTime - bTime
+        : a.year - b.year;
+      if (sortOption === 'oldest') return chronological;
+      if (sortOption === 'recent') return -chronological;
       if (sortOption === 'casualties') return (b.numericCasualties || 0) - (a.numericCasualties || 0);
       if (sortOption === 'sources') return (b.sources?.length || 0) - (a.sources?.length || 0);
       if (sortOption === 'alphabetical') return a.eventName.localeCompare(b.eventName);
@@ -443,7 +454,7 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
               </span>
               <span className="text-slate-300">•</span>
               <Calendar className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-              <TranslatedText text={bundle.dateRange} language={language} />
+              <TranslatedText text={bundle.eventDate ? formatDisasterDate(bundle.eventDate) : bundle.dateRange} language={language} />
             </div>
           </div>
         </div>

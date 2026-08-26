@@ -1,6 +1,6 @@
 import { XMLParser } from 'fast-xml-parser';
 import { NewsArticle } from './types/disaster';
-import { deduplicateNewsArticles, evaluateTemporalGate } from './lib/evidenceUtils';
+import { deduplicateNewsArticles, evaluateTemporalGate, filterIncidentEvidenceArticles } from './lib/evidenceUtils';
 
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
@@ -128,7 +128,7 @@ export async function searchGoogleNews(
     console.log('Google News fetch notice:', (err as Error).message);
   }
 
-  const deduped = deduplicateNewsArticles(articles).slice(0, maxResults);
+  const deduped = filterIncidentEvidenceArticles(deduplicateNewsArticles(articles)).slice(0, maxResults);
   newsCache.set(cacheKey, {
     expiresAt: Date.now() + NEWS_CACHE_TTL_MS,
     articles: deduped,

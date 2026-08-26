@@ -1,5 +1,18 @@
 import { CitedSource, NewsArticle } from '../types/disaster';
 
+export interface NumericClaim {
+  value: number;
+  sourceId?: string;
+  text: string;
+}
+
+export interface NumericReconciliationResult {
+  rangeMin: number;
+  rangeMax: number;
+  outliers: number[];
+  outlierClaims: NumericClaim[];
+}
+
 /**
  * Validates and sanitizes citation references in text.
  * If text contains [S7] or [S99] but only [S1, S2, S3] exist in the evidence bundle,
@@ -127,4 +140,118 @@ export function evaluateTemporalGate(
       reason: `Article is older than ${windowHours} hours (${Math.round(diffHours)}h old)`,
     };
   }
+}
+
+const casualtyContextPattern =
+  /\b(death|deaths|dead|killed|fatalit(?:y|ies)|casualt(?:y|ies)|missing|injured|injur(?:y|ies)|victims?)\b/i;
+const numericPattern = /\b\d{1,3}(?:,\d{2,3})*(?:\.\d+)?\b/g;
+
+function normalizeNumericClaim(raw: string): number | null {
+  const value = Number(raw.replace(/,/g, ''));
+  if (!Number.isFinite(value) || value <= 0) return null;
+  return Math.round(value);
+}
+
+/**
+ * Extracts casualty and human-impact numeric claims from raw source text.
+ * This intentionally requires nearby casualty language so years, dates, and money
+ * do not get promoted into human-loss statistics.
+ */
+export function extractCasualtyNumericClaims(sources: Array<Pick<CitedSource, 'id' | 'title' | 'summary'>>): NumericClaim[] {
+  const claims: NumericClaim[] = [];
+
+  for (const source of sources) {
+    const text = `${source.title || ''}. ${source.summary || ''}`;
+    const matches = Array.from(text.matchAll(numericPattern));
+
+    for (const match of matches) {
+      const start = Math.max(0, (match.index || 0) - 48);
+      const end = Math.min(text.length, (match.index || 0) + match[0].length + 48);
+      const context = text.slice(start, end);
+      if (!casualtyContextPattern.test(context)) continue;
+
+      const value = normalizeNumericClaim(match[0]);
+      if (value === null) continue;
+      claims.push({
+        value,
+        sourceId: source.id,
+        text: context.replace(/\s+/g, ' ').trim(),
+      });
+    }
+  }
+
+  return claims;
+}
+
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
+
+/**
+ * Reconciles numeric claims by clustering around the median and separating
+ * extreme values. For small news sets, a value at least 3x the median is a
+ * clearer signal than IQR, which is unstable with only 3-5 sources.
+ */
+export function reconcileNumericClaims(values: number[] | NumericClaim[]): NumericReconciliationResult {
+  const claims: NumericClaim[] = values
+    .map((value) => typeof value === 'number' ? { value, text: String(value) } : value)
+    .filter((claim) => Number.isFinite(claim.value) && claim.value > 0);
+
+  if (!claims.length) {
+    return { rangeMin: 0, rangeMax: 0, outliers: [], outlierClaims: [] };
+  }
+
+  if (claims.length === 1) {
+    return { rangeMin: claims[0].value, rangeMax: claims[0].value, outliers: [], outlierClaims: [] };
+  }
+
+  const valuesOnly = claims.map((claim) => claim.value);
+  const med = median(valuesOnly);
+  const sorted = [...valuesOnly].sort((a, b) => a - b);
+  const lower = sorted.slice(0, Math.floor(sorted.length / 2));
+  const upper = sorted.slice(Math.ceil(sorted.length / 2));
+  const q1 = lower.length ? median(lower) : sorted[0];
+  const q3 = upper.length ? median(upper) : sorted[sorted.length - 1];
+  const iqr = q3 - q1;
+
+  const outlierClaims = claims.filter((claim) => {
+    if (claims.length <= 5 && med > 0 && claim.value >= med * 3) return true;
+    if (iqr > 0 && (claim.value < q1 - 1.5 * iqr || claim.value > q3 + 1.5 * iqr)) return true;
+    return false;
+  });
+
+  const outlierSet = new Set(outlierClaims);
+  const clustered = claims.filter((claim) => !outlierSet.has(claim));
+  const finalCluster = clustered.length ? clustered : claims;
+  const clusterValues = finalCluster.map((claim) => claim.value);
+
+  return {
+    rangeMin: Math.min(...clusterValues),
+    rangeMax: Math.max(...clusterValues),
+    outliers: outlierClaims.map((claim) => claim.value),
+    outlierClaims,
+  };
+}
+
+const incidentEvidencePattern =
+  /\b(killed|dead|deaths?|fatalit(?:y|ies)|injured|missing|evacuat(?:ed|ion)|rescued?|relief|shelter|ndrf|sdrf|damage(?:d)?|collapsed?|washed away|inundat(?:ed|ion)|landslide|flood(?:ed)?|cyclone|earthquake|heatwave|heat wave|district|village|rainfall|warning issued)\b/i;
+const hardIncidentPattern =
+  /\b(killed|dead|deaths?|fatalit(?:y|ies)|injured|missing|evacuat(?:ed|ion)|rescued?|relief|shelter|ndrf|sdrf|damage(?:d)?|collapsed?|washed away|inundat(?:ed|ion)|district|village)\b/i;
+const techAnnouncementPattern =
+  /\b(new\s+(?:app|model|ai|system|tech|device|drone|sensor)\s+(?:to\s+|that\s+|for\s+)?(?:predict|counter|detect|prevent|warn)|launch(?:es|ed)?|unveils?|startup|funding|raises?\s+\$|partnership|research paper|study finds)\b/i;
+
+export function scoreIncidentEvidence(article: Pick<NewsArticle, 'title' | 'summary'>): number {
+  const text = `${article.title || ''}. ${article.summary || ''}`;
+  let score = 0;
+  const matches = text.match(new RegExp(incidentEvidencePattern.source, 'gi'));
+  score += matches ? Math.min(matches.length, 5) : 0;
+  if (/\b(19|20)\d{2}\b/.test(text)) score += 1;
+  if (techAnnouncementPattern.test(text) && !hardIncidentPattern.test(text)) return 0;
+  return score;
+}
+
+export function filterIncidentEvidenceArticles<T extends Pick<NewsArticle, 'title' | 'summary'>>(articles: T[]): T[] {
+  return articles.filter((article) => scoreIncidentEvidence(article) > 0);
 }

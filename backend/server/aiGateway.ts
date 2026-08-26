@@ -7,16 +7,32 @@ import {
   DisasterCategory,
 } from './types/disaster';
 import type { HistoricalDisasterItem } from './data/historicalDisasters';
-import { validateAndCleanCitations } from './lib/evidenceUtils';
+import {
+  extractCasualtyNumericClaims,
+  filterIncidentEvidenceArticles,
+  reconcileNumericClaims,
+  validateAndCleanCitations,
+} from './lib/evidenceUtils';
+import { coerceIsoDate, formatDisasterDate } from './lib/dateFormat';
 import { normalizeLang, translateArray, translateText } from './lib/translate';
 import { searchGoogleNews } from './googleNews';
 
 const evidenceBundleCache = new Map<string, { expiresAt: number; bundle: EvidenceBundle }>();
 const recentArchiveCache = new Map<string, { expiresAt: number; items: HistoricalDisasterItem[] }>();
+const eraDiscoveryCache = new Map<string, { expiresAt: number; events: EraDisasterSeed[] }>();
 let recentArchiveWarmupStarted = false;
 const EVIDENCE_BUNDLE_CACHE_TTL_MS = 10 * 60 * 1000;
 const RECENT_ARCHIVE_CACHE_TTL_MS = 20 * 60 * 1000;
+const ERA_DISCOVERY_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 type GroqKeyScope = 'default' | 'past' | 'pastFilters' | 'chat' | 'stt' | 'tts';
+type EraDisasterSeed = {
+  eventName: string;
+  approxDate: string;
+  eventDate?: string;
+  location: string;
+  state?: string;
+  disasterType: DisasterCategory;
+};
 const RECENT_ARCHIVE_QUERIES = [
   'India flood',
   'India cyclone',
@@ -216,6 +232,73 @@ function inferLocation(text: string, fallbackState: string): string {
   return 'India';
 }
 
+function deriveYearFromBundle(bundle: EvidenceBundle): number {
+  const eventDate = coerceIsoDate(bundle.eventDate);
+  if (eventDate) return new Date(eventDate).getFullYear();
+  const dateRangeYear = bundle.dateRange?.match(/\b(19\d\d|20\d\d)\b/)?.[0];
+  if (dateRangeYear) return Number(dateRangeYear);
+  return new Date(bundle.synthesizedAt).getFullYear();
+}
+
+function formatCasualtyRange(range: ReturnType<typeof reconcileNumericClaims>): string | null {
+  if (!range.rangeMin && !range.rangeMax) return null;
+  const base = range.rangeMin === range.rangeMax
+    ? `${range.rangeMin.toLocaleString('en-IN')} reported casualties/deaths in retrieved source claims.`
+    : `${range.rangeMin.toLocaleString('en-IN')}-${range.rangeMax.toLocaleString('en-IN')} reported casualties/deaths across clustered source claims.`;
+  if (!range.outliers.length) return base;
+  return `${base} Outlier claim(s) ${range.outliers.map((value) => value.toLocaleString('en-IN')).join(', ')} excluded from the range.`;
+}
+
+function buildNumericRangeObject(range: ReturnType<typeof reconcileNumericClaims>): EvidenceBundle['numericCasualtiesRange'] | undefined {
+  if (!range.rangeMin && !range.rangeMax) return undefined;
+  return {
+    min: range.rangeMin,
+    max: range.rangeMax,
+    outliers: range.outliers,
+    outlierSources: range.outlierClaims.map((claim) => ({
+      value: claim.value,
+      sourceIds: claim.sourceId ? [claim.sourceId] : [],
+    })),
+  };
+}
+
+function buildNumericConflictReports(range: ReturnType<typeof reconcileNumericClaims>): ConflictingReport[] {
+  return range.outlierClaims.map((claim) => ({
+    topic: 'Casualty figure outlier',
+    details: `${claim.value.toLocaleString('en-IN')} was excluded from the reported casualty range as a statistical outlier${claim.sourceId ? ` [${claim.sourceId}]` : ''}.`,
+    sources: claim.sourceId ? [claim.sourceId] : [],
+  }));
+}
+
+function normalizeSynthesizedData(raw: any, fallbackQuery: string, sources: CitedSource[]): any {
+  const fallback = buildDeterministicFallbackSynthesis(fallbackQuery, sources);
+  const data = raw && typeof raw === 'object' ? raw : {};
+  return {
+    ...fallback,
+    ...data,
+    eventName: typeof data.eventName === 'string' && data.eventName.trim() ? data.eventName.trim() : fallback.eventName,
+    disasterType: typeof data.disasterType === 'string' && data.disasterType.trim() ? data.disasterType.trim() : fallback.disasterType,
+    location: typeof data.location === 'string' && data.location.trim() ? data.location.trim() : fallback.location,
+    state: typeof data.state === 'string' && data.state.trim() ? data.state.trim() : fallback.state,
+    country: 'India',
+    dateRange: typeof data.dateRange === 'string' && data.dateRange.trim() ? data.dateRange.trim() : fallback.dateRange,
+    eventDate: coerceIsoDate(data.eventDate || data.approxDate || data.dateRange),
+    conflictingReports: Array.isArray(data.conflictingReports) ? data.conflictingReports : [],
+    timeline: Array.isArray(data.timeline) ? data.timeline : [],
+  };
+}
+
+function sortArchiveItems(items: HistoricalDisasterItem[]): HistoricalDisasterItem[] {
+  return items.sort((a, b) => {
+    const aTime = a.eventDate ? new Date(a.eventDate).getTime() : NaN;
+    const bTime = b.eventDate ? new Date(b.eventDate).getTime() : NaN;
+    if (Number.isFinite(aTime) && Number.isFinite(bTime) && aTime !== bTime) return bTime - aTime;
+    if (Number.isFinite(aTime)) return -1;
+    if (Number.isFinite(bTime)) return 1;
+    return b.year - a.year;
+  });
+}
+
 function toBase64(buffer: ArrayBuffer | Uint8Array): string {
   const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
   return Buffer.from(bytes).toString('base64');
@@ -348,6 +431,18 @@ export async function generateWithFallback(params: {
   }
 }
 
+async function normalizeDisasterSearchQuery(query: string): Promise<string | null> {
+  const raw = await generateWithFallback({
+    keyScope: 'past',
+    systemInstruction: 'Correct Indian disaster event search phrases. Return only the corrected search phrase, with no commentary.',
+    prompt: `The user is searching for an Indian disaster event. Correct spelling or typo errors to the most likely real event/location name. If it is already correct, return the original phrase.\n\nQuery: ${query}`,
+  });
+
+  const normalized = raw?.replace(/^["']|["']$/g, '').replace(/\s+/g, ' ').trim();
+  if (!normalized || normalized.toLowerCase() === query.toLowerCase()) return null;
+  return normalized;
+}
+
 export async function buildHistoricalEvidenceBundle(
   userQuery: string,
   categoryFilter?: string,
@@ -365,7 +460,7 @@ export async function buildHistoricalEvidenceBundle(
     return cached.bundle;
   }
 
-  const searchQueries = Array.from(
+  let searchQueries = Array.from(
     new Set(
       [
         baseQuery,
@@ -385,6 +480,23 @@ export async function buildHistoricalEvidenceBundle(
     allArticles.push(...res);
   }
 
+  if (!allArticles.length) {
+    const normalizedQuery = await normalizeDisasterSearchQuery(baseQuery);
+    if (normalizedQuery) {
+      searchQueries = Array.from(new Set([
+        ...searchQueries,
+        normalizedQuery,
+        `${normalizedQuery} India`,
+        `${normalizedQuery} India disaster`,
+        `${normalizedQuery} casualties damage`,
+      ]));
+      for (const q of searchQueries.slice(-4)) {
+        const res = await searchGoogleNews(q, { isCurrentNews: false, maxResults: 4 });
+        allArticles.push(...res);
+      }
+    }
+  }
+
   const uniqueArticlesMap = new Map<string, NewsArticle>();
   for (const art of allArticles) {
     const key = art.title.toLowerCase().trim();
@@ -393,7 +505,7 @@ export async function buildHistoricalEvidenceBundle(
     }
   }
 
-  const sourcesList = Array.from(uniqueArticlesMap.values()).slice(0, 6);
+  const sourcesList = filterIncidentEvidenceArticles(Array.from(uniqueArticlesMap.values())).slice(0, 6);
   if (!sourcesList.length) {
     throw new Error('No live Google News sources were found for this query.');
   }
@@ -411,6 +523,8 @@ export async function buildHistoricalEvidenceBundle(
   const sourcesText = citedSources
     .map((s) => `[${s.id}] Title: ${s.title}\nPublisher: ${s.publisher} (${s.publishedAt})\nSummary: ${s.summary}\nURL: ${s.url}`)
     .join('\n\n');
+  const casualtyReconciliation = reconcileNumericClaims(extractCasualtyNumericClaims(citedSources));
+  const casualtyRangeText = formatCasualtyRange(casualtyReconciliation);
 
 const systemInstruction = `You are a Senior Disaster Intelligence Research Architect.
 Synthesize the provided disaster evidence strictly using the source documents labeled [S1], [S2], etc.
@@ -426,6 +540,8 @@ Category Filter: ${categoryFilter || 'None'}
 State Filter: ${stateFilter || 'None'}
 Retrieved Sources:
 ${sourcesText}
+Pre-computed casualty reconciliation:
+${casualtyRangeText || 'No casualty/death numeric claims were confidently extracted from the source text.'}
 
 Produce a structured historical evidence synthesis in JSON format:
 {
@@ -434,6 +550,7 @@ Produce a structured historical evidence synthesis in JSON format:
   "location": "Affected City/District",
   "state": "State name",
   "country": "India",
+  "eventDate": "ISO 8601 event date if the event occurrence date is supported by the sources",
   "dateRange": "Date or range",
   "reportedCasualties": "Reported human loss with citations",
   "reportedDamage": "Summary of infrastructure and economic loss with citations",
@@ -461,14 +578,14 @@ Produce a structured historical evidence synthesis in JSON format:
     });
 
     if (rawJson) {
-      synthesizedData = JSON.parse(stripCodeFences(rawJson));
+      synthesizedData = normalizeSynthesizedData(JSON.parse(stripCodeFences(rawJson)), baseQuery, citedSources);
     }
   } catch (err) {
     console.warn('Groq synthesis parse failure:', (err as Error).message);
   }
 
   if (!synthesizedData) {
-    synthesizedData = buildDeterministicFallbackSynthesis(baseQuery, citedSources);
+    synthesizedData = normalizeSynthesizedData(buildDeterministicFallbackSynthesis(baseQuery, citedSources), baseQuery, citedSources);
   }
 
   const whatHappened = validateAndCleanCitations(synthesizedData.whatHappened || '', citedSources);
@@ -479,7 +596,10 @@ Produce a structured historical evidence synthesis in JSON format:
   const governmentResponse = validateAndCleanCitations(synthesizedData.governmentResponse || '', citedSources);
   const rescueRelief = validateAndCleanCitations(synthesizedData.rescueRelief || '', citedSources);
   const recovery = validateAndCleanCitations(synthesizedData.recovery || '', citedSources);
-  const reportedCasualties = validateAndCleanCitations(synthesizedData.reportedCasualties || '', citedSources);
+  const reportedCasualties = validateAndCleanCitations(
+    casualtyRangeText || synthesizedData.reportedCasualties || '',
+    citedSources,
+  );
   const reportedDamage = validateAndCleanCitations(synthesizedData.reportedDamage || '', citedSources);
 
   const cleanTimeline: TimelineEvent[] = (synthesizedData.timeline || []).map((t: any) => ({
@@ -489,11 +609,15 @@ Produce a structured historical evidence synthesis in JSON format:
     citations: (t.citations || []).filter((c: string) => citedSources.some((s) => s.id === c)),
   }));
 
-  const cleanConflicts: ConflictingReport[] = (synthesizedData.conflictingReports || []).map((c: any) => ({
+  const cleanConflicts: ConflictingReport[] = [
+    ...buildNumericConflictReports(casualtyReconciliation),
+    ...(synthesizedData.conflictingReports || []).map((c: any) => ({
     topic: c.topic || 'Reported Figures',
     details: validateAndCleanCitations(c.details || '', citedSources),
     sources: (c.sources || []).filter((sId: string) => citedSources.some((s) => s.id === sId)),
-  }));
+    })),
+  ];
+  const eventDate = coerceIsoDate(synthesizedData.eventDate || synthesizedData.dateRange);
 
   const bundle: EvidenceBundle = {
     id: `ev-${Date.now()}-${Math.random().toString(36).substring(7)}`,
@@ -502,7 +626,9 @@ Produce a structured historical evidence synthesis in JSON format:
     location: synthesizedData.location || 'India',
     state: synthesizedData.state || 'India',
     country: 'India',
-    dateRange: synthesizedData.dateRange || 'Documented Occurrence',
+    eventDate,
+    dateRange: eventDate ? formatDisasterDate(eventDate) : synthesizedData.dateRange || 'Documented Occurrence',
+    numericCasualtiesRange: buildNumericRangeObject(casualtyReconciliation),
     reportedCasualties: reportedCasualties || 'Casualty figures documented in source reports.',
     reportedDamage: reportedDamage || 'Infrastructure and sector damages documented in evidence.',
     sources: citedSources,
@@ -640,11 +766,11 @@ function buildArchiveQueryPool(options?: {
 }
 
 function bundleToArchiveItem(bundle: EvidenceBundle, index: number): HistoricalDisasterItem {
-  const year = Number(bundle.dateRange?.match(/\b(19\d\d|20\d\d)\b/)?.[0] || new Date(bundle.synthesizedAt).getFullYear());
+  const year = deriveYearFromBundle(bundle);
   return {
     ...bundle,
     year,
-    numericCasualties: Number(bundle.reportedCasualties?.match(/(\d[\d,]*)/)?.[1]?.replace(/,/g, '') || 0),
+    numericCasualties: bundle.numericCasualtiesRange?.max || Number(bundle.reportedCasualties?.match(/(\d[\d,]*)/)?.[1]?.replace(/,/g, '') || 0),
     decade: year < 2000 ? '1990s' : year < 2010 ? '2000s' : year < 2020 ? '2010s' : '2020s',
     id: bundle.id || `archive-${index}`,
   };
@@ -663,18 +789,18 @@ function makeArchiveTimeline(sources: CitedSource[]): TimelineEvent[] {
   }
 
   return sources.map((source, idx) => ({
-    date: new Date(source.publishedAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }),
+    date: formatDisasterDate(source.publishedAt),
     event: source.title.slice(0, 48),
     description: `${source.summary} [${source.id}]`,
     citations: [source.id],
   }));
 }
 
-async function buildArchiveEvidenceBundle(query: string, index: number): Promise<HistoricalDisasterItem | null> {
+async function buildArchiveEvidenceBundle(query: string, index: number, seed?: EraDisasterSeed): Promise<HistoricalDisasterItem | null> {
   const articles = await searchGoogleNews(query, { isCurrentNews: false, maxResults: 3 });
-  const sourcesList = articles.slice(0, 3);
+  const sourcesList = filterIncidentEvidenceArticles(articles).slice(0, 3);
 
-  if (!sourcesList.length) {
+  if (!sourcesList.length && !seed) {
     return null;
   }
 
@@ -689,41 +815,46 @@ async function buildArchiveEvidenceBundle(query: string, index: number): Promise
   }));
 
   const joinedText = [query, ...citedSources.map((s) => `${s.title} ${s.summary}`)].join(' ');
-  const disasterType = inferDisasterType(joinedText);
-  const queryState = inferState(query);
+  const disasterType = seed?.disasterType || inferDisasterType(joinedText);
+  const queryState = seed?.state || inferState(query);
   const state = queryState !== 'India' ? queryState : inferState(joinedText);
-  const location = inferLocation(joinedText, state);
+  const location = seed?.location || inferLocation(joinedText, state);
   const topSource = citedSources[0];
-  const year = Number(new Date(topSource.publishedAt).getFullYear() || new Date().getFullYear());
+  const eventDate = coerceIsoDate(seed?.eventDate || seed?.approxDate) || coerceIsoDate(topSource?.publishedAt);
+  const casualtyReconciliation = reconcileNumericClaims(extractCasualtyNumericClaims(citedSources));
+  const casualtyRangeText = formatCasualtyRange(casualtyReconciliation);
+  const sourceCitation = citedSources[0] ? ` [${citedSources[0].id}]` : '';
 
   const bundle: EvidenceBundle = {
     id: `ev-${Date.now()}-${Math.random().toString(36).substring(7)}`,
-    eventName: topSource.title.replace(/^\d{4}\s*[-:]\s*/, '') || query,
+    eventName: seed?.eventName || topSource?.title.replace(/^\d{4}\s*[-:]\s*/, '') || query,
     disasterType,
     location,
     state,
     country: 'India',
-    dateRange: new Date(topSource.publishedAt).toLocaleDateString('en-IN', {
-      day: '2-digit',
-      month: 'long',
-      year: 'numeric',
-    }),
-    reportedCasualties: 'Information unavailable in the retrieved sources.',
+    eventDate,
+    dateRange: eventDate ? formatDisasterDate(eventDate) : seed?.approxDate || 'Documented Occurrence',
+    numericCasualtiesRange: buildNumericRangeObject(casualtyReconciliation),
+    reportedCasualties: casualtyRangeText || 'Information unavailable in the retrieved sources.',
     reportedDamage: 'Information unavailable in the retrieved sources.',
     sources: citedSources,
     timeline: makeArchiveTimeline(citedSources),
-    whatHappened: citedSources.map((s) => `${s.summary} [${s.id}]`).join(' '),
-    affectedAreas: `Coverage indicates ${state} and nearby affected districts were discussed in the retrieved sources.`,
-    humanImpact: 'Human impact details were referenced in the retrieved source coverage.',
+    whatHappened: citedSources.length
+      ? citedSources.map((s) => `${s.summary} [${s.id}]`).join(' ')
+      : `${seed?.eventName || query} is a model-sourced historical Indian disaster seed for ${location}, ${state}. External Google News citations were sparse for this era.`,
+    affectedAreas: `Coverage indicates ${state} and nearby affected districts were discussed${sourceCitation}.`,
+    humanImpact: citedSources.length ? 'Human impact details were referenced in the retrieved source coverage.' : 'Human impact details require external archival corroboration.',
     infrastructureDamage: 'Infrastructure damage details were not clearly quantified in the retrieved source coverage.',
     economicImpact: 'Economic impact figures were not clearly quantified in the retrieved source coverage.',
     governmentResponse: 'Official response details were summarized in the retrieved source coverage.',
     rescueRelief: 'Rescue and relief information was referenced in the retrieved source coverage.',
     recovery: 'Recovery details were not clearly quantified in the retrieved source coverage.',
-    sourceAssessment: `Synthesized from ${citedSources.length} live news sources indexed for the archive.`,
-    conflictingReports: [],
+    sourceAssessment: citedSources.length
+      ? `Synthesized from ${citedSources.length} live news sources indexed for the archive.`
+      : 'Model-Sourced / Limited External Citation: Google News RSS returned sparse or no archival citations for this era; event metadata comes from the era discovery model prompt.',
+    conflictingReports: buildNumericConflictReports(casualtyReconciliation),
     synthesizedAt: new Date().toISOString(),
-    evidenceStatus: citedSources.length >= 2 ? 'High Confidence' : 'Moderate Evidence',
+    evidenceStatus: citedSources.length >= 2 ? 'High Confidence' : citedSources.length ? 'Moderate Evidence' : 'Model-Sourced / Limited External Citation',
     retrievalMetadata: {
       queriesExecuted: [query],
       rawSourcesCount: articles.length,
@@ -732,6 +863,91 @@ async function buildArchiveEvidenceBundle(query: string, index: number): Promise
   };
 
   return bundleToArchiveItem(bundle, index);
+}
+
+export async function discoverEraDisasters(params: {
+  decade?: string;
+  state?: string;
+  category?: string;
+  limit: number;
+}): Promise<EraDisasterSeed[]> {
+  const cacheKey = JSON.stringify({
+    decade: params.decade || '2020s',
+    state: params.state || '',
+    category: params.category || '',
+    limit: params.limit,
+  }).toLowerCase();
+  const cached = eraDiscoveryCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.events;
+
+  const fallbackSeeds: EraDisasterSeed[] = [
+    { eventName: '1999 Odisha Super Cyclone', approxDate: '1999-10-29', location: 'Odisha coast', state: 'Odisha', disasterType: 'Cyclone' },
+    { eventName: '1993 Latur earthquake', approxDate: '1993-09-30', location: 'Latur and Osmanabad', state: 'Maharashtra', disasterType: 'Earthquake' },
+    { eventName: '1998 Malpa landslide', approxDate: '1998-08-18', location: 'Malpa, Pithoragarh', state: 'Uttarakhand', disasterType: 'Landslide' },
+    { eventName: '2001 Gujarat earthquake', approxDate: '2001-01-26', location: 'Bhuj and Kutch', state: 'Gujarat', disasterType: 'Earthquake' },
+    { eventName: '2004 Indian Ocean tsunami Tamil Nadu', approxDate: '2004-12-26', location: 'Tamil Nadu coast', state: 'Tamil Nadu', disasterType: 'Tsunami' },
+    { eventName: '2008 Bihar Kosi flood', approxDate: '2008-08-18', location: 'Kosi basin', state: 'Bihar', disasterType: 'Flood' },
+    { eventName: '2013 Uttarakhand floods', approxDate: '2013-06-16', location: 'Kedarnath and Garhwal', state: 'Uttarakhand', disasterType: 'Flood' },
+    { eventName: '2014 Kashmir floods', approxDate: '2014-09-05', location: 'Jammu and Kashmir', state: 'Jammu and Kashmir', disasterType: 'Flood' },
+    { eventName: '2018 Kerala floods', approxDate: '2018-08-15', location: 'Kerala', state: 'Kerala', disasterType: 'Flood' },
+    { eventName: '2020 Cyclone Amphan', approxDate: '2020-05-20', location: 'West Bengal and Odisha coast', state: 'West Bengal', disasterType: 'Cyclone' },
+    { eventName: '2021 Chamoli disaster', approxDate: '2021-02-07', location: 'Chamoli', state: 'Uttarakhand', disasterType: 'Flood' },
+    { eventName: '2024 Wayanad landslides', approxDate: '2024-07-30', location: 'Wayanad', state: 'Kerala', disasterType: 'Landslide' },
+  ];
+
+  const raw = await generateWithFallback({
+    keyScope: 'pastFilters',
+    responseMimeType: 'application/json',
+    systemInstruction: 'You list only real, verifiable, well-known Indian disaster events. Return strict JSON only. Do not invent events.',
+    prompt: `List up to ${Math.min(Math.max(params.limit, 1), 20)} real, notable Indian disaster events matching:
+decade: ${params.decade || 'any, prefer 2020s'}
+state: ${params.state || 'any'}
+category: ${params.category || 'any'}
+Return {"events":[{"eventName":"","approxDate":"YYYY-MM-DD or YYYY-MM","location":"","state":"","disasterType":"Cyclone | Flood | Earthquake | Landslide | Heavy Rain | Heat Wave | Tsunami | Avalanche | Forest Fire | Drought | General Alert"}]}.
+Prefer high-confidence events with known names and dates.`,
+  });
+
+  let discovered: EraDisasterSeed[] = [];
+  if (raw) {
+    try {
+      const parsed = JSON.parse(stripCodeFences(raw));
+      discovered = Array.isArray(parsed?.events) ? parsed.events
+        .map((event: any) => ({
+          eventName: String(event.eventName || '').trim(),
+          approxDate: String(event.approxDate || '').trim(),
+          eventDate: coerceIsoDate(event.approxDate),
+          location: String(event.location || '').trim(),
+          state: String(event.state || '').trim() || undefined,
+          disasterType: (event.disasterType as DisasterCategory) || 'General Alert',
+        }))
+        .filter((event: EraDisasterSeed) => event.eventName && event.location && event.eventDate) : [];
+    } catch (error) {
+      console.warn('Era discovery parse failed:', (error as Error).message);
+    }
+  }
+
+  const decade = params.decade && params.decade !== 'all' ? params.decade : undefined;
+  const state = params.state && params.state !== 'All States' ? params.state.toLowerCase() : undefined;
+  const category = params.category && params.category !== 'all' ? params.category.toLowerCase() : undefined;
+  const deterministic = fallbackSeeds.filter((event) => {
+    const year = new Date(coerceIsoDate(event.approxDate) || event.approxDate).getFullYear();
+    if (decade) {
+      const eventDecade = year < 2000 ? '1990s' : year < 2010 ? '2000s' : year < 2020 ? '2010s' : '2020s';
+      if (eventDecade !== decade) return false;
+    }
+    if (state && !(event.state || '').toLowerCase().includes(state) && !event.location.toLowerCase().includes(state)) return false;
+    if (category && !event.disasterType.toLowerCase().includes(category)) return false;
+    return true;
+  });
+  const merged = [...discovered, ...deterministic]
+    .filter((event, idx, all) => all.findIndex((candidate) => candidate.eventName.toLowerCase() === event.eventName.toLowerCase()) === idx)
+    .slice(0, params.limit);
+
+  eraDiscoveryCache.set(cacheKey, {
+    expiresAt: Date.now() + ERA_DISCOVERY_CACHE_TTL_MS,
+    events: merged,
+  });
+  return merged;
 }
 
 export async function buildRecentIndiaArchive(limit: number = 100, options?: {
@@ -748,6 +964,25 @@ export async function buildRecentIndiaArchive(limit: number = 100, options?: {
   const cached = recentArchiveCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.items;
+  }
+
+  if (options?.decadeFilter && options.decadeFilter !== 'all') {
+    const seeds = await discoverEraDisasters({
+      decade: options.decadeFilter,
+      state: options.stateFilter,
+      category: options.categoryFilter,
+      limit,
+    });
+    const results = await Promise.allSettled(
+      seeds.map((seed, index) => buildArchiveEvidenceBundle(`${seed.eventName} ${seed.approxDate}`, index, seed)),
+    );
+    const sorted = sortArchiveItems(results
+      .filter((result): result is PromiseFulfilledResult<HistoricalDisasterItem | null> => result.status === 'fulfilled')
+      .map((result) => result.value)
+      .filter((item): item is HistoricalDisasterItem => Boolean(item)))
+      .slice(0, limit);
+    recentArchiveCache.set(cacheKey, { expiresAt: Date.now() + RECENT_ARCHIVE_CACHE_TTL_MS, items: sorted });
+    return sorted;
   }
 
   const queries = buildArchiveQueryPool({ ...options, limit });
@@ -792,7 +1027,7 @@ export async function buildRecentIndiaArchive(limit: number = 100, options?: {
     if (archive.length >= limit) break;
   }
 
-  const sorted = archive.sort((a, b) => b.year - a.year).slice(0, limit);
+  const sorted = sortArchiveItems(archive).slice(0, limit);
 
   recentArchiveCache.set(cacheKey, {
     expiresAt: Date.now() + RECENT_ARCHIVE_CACHE_TTL_MS,
@@ -858,7 +1093,17 @@ export async function buildFilteredIndiaArchive(
     return cached.items;
   }
 
-  const queries = await buildFilterSearchPlan(options, safeLimit);
+  const seeds = options.decadeFilter && options.decadeFilter !== 'all'
+    ? await discoverEraDisasters({
+        decade: options.decadeFilter,
+        state: options.stateFilter,
+        category: options.categoryFilter,
+        limit: safeLimit,
+      })
+    : [];
+  const queries = seeds.length
+    ? seeds.map((seed) => `${seed.eventName} ${seed.approxDate}`)
+    : await buildFilterSearchPlan(options, safeLimit);
   const archive: HistoricalDisasterItem[] = [];
   const seen = new Set<string>();
   const concurrency = 4;
@@ -886,7 +1131,7 @@ export async function buildFilteredIndiaArchive(
   for (let i = 0; i < queries.length && archive.length < safeLimit; i += concurrency) {
     const batch = queries.slice(i, i + concurrency);
     const batchResults = await Promise.allSettled(
-      batch.map((query, offset) => buildArchiveEvidenceBundle(query, i + offset)),
+      batch.map((query, offset) => buildArchiveEvidenceBundle(query, i + offset, seeds[i + offset])),
     );
 
     for (const result of batchResults) {
@@ -900,7 +1145,7 @@ export async function buildFilteredIndiaArchive(
     }
   }
 
-  const sorted = archive.sort((a, b) => b.year - a.year).slice(0, safeLimit);
+  const sorted = sortArchiveItems(archive).slice(0, safeLimit);
   recentArchiveCache.set(cacheKey, {
     expiresAt: Date.now() + RECENT_ARCHIVE_CACHE_TTL_MS,
     items: sorted,
