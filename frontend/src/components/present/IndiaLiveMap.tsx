@@ -412,9 +412,9 @@ export const IndiaLiveMap: React.FC<IndiaLiveMapProps> = ({
           lineCap: 'round',
         });
 
-          polygon.on('click', () => {
-            onSelectAlertRef.current(alert);
-          });
+        polygon.on('click', () => {
+          onSelectAlertRef.current(alert);
+        });
 
         polygon.bindTooltip(
           `<strong>${alert.event}</strong><br/>${alert.areaDesc}<br/><span style="color:#e11d48;font-weight:bold;">${alert.severity}</span>`,
@@ -443,13 +443,12 @@ export const IndiaLiveMap: React.FC<IndiaLiveMapProps> = ({
       if (markerPos) {
         const iconHtml = `
           <div class="relative group cursor-pointer flex flex-col items-center">
-            <div class="w-8 h-8 rounded-2xl bg-white border border-slate-200 shadow-md flex items-center justify-center ${
-              isSelected
-                ? 'ring-4 ring-indigo-300 ring-offset-2'
-                : isExtreme
-                ? 'ring-2 ring-rose-300'
-                : 'ring-1 ring-amber-200'
-            } transition-transform hover:scale-110">
+            <div class="w-8 h-8 rounded-2xl bg-white border border-slate-200 shadow-md flex items-center justify-center ${isSelected
+            ? 'ring-4 ring-indigo-300 ring-offset-2'
+            : isExtreme
+              ? 'ring-2 ring-rose-300'
+              : 'ring-1 ring-amber-200'
+          } transition-transform hover:scale-110">
               ${getCategoryIconSvg(alert.category, alert.severity)}
             </div>
             <div class="mt-1 px-2 py-0.5 rounded-full bg-slate-900 text-[9px] font-bold text-white tracking-tight whitespace-nowrap shadow-sm">
@@ -566,11 +565,10 @@ export const IndiaLiveMap: React.FC<IndiaLiveMapProps> = ({
         <button
           type="button"
           onClick={() => setActiveCategoryFilter(null)}
-          className={`px-3.5 py-1.5 rounded-full text-xs font-semibold backdrop-blur-md transition-all shadow-sm shrink-0 flex items-center gap-1.5 ${
-            activeCategoryFilter === null
+          className={`px-3.5 py-1.5 rounded-full text-xs font-semibold backdrop-blur-md transition-all shadow-sm shrink-0 flex items-center gap-1.5 ${activeCategoryFilter === null
               ? 'bg-slate-900 text-white shadow-md'
               : 'bg-white/95 text-slate-700 border border-slate-200 hover:bg-slate-50'
-          }`}
+            }`}
         >
           <Layers className="w-3.5 h-3.5 text-indigo-400" />
           <span>{translate(language, 'present.allHazards', { count: alerts.length })}</span>
@@ -581,16 +579,14 @@ export const IndiaLiveMap: React.FC<IndiaLiveMapProps> = ({
             key={cat}
             type="button"
             onClick={() => setActiveCategoryFilter(activeCategoryFilter === cat ? null : cat)}
-            className={`px-3.5 py-1.5 rounded-full text-xs font-semibold backdrop-blur-md transition-all shadow-sm shrink-0 flex items-center gap-1.5 ${
-              activeCategoryFilter === cat
+            className={`px-3.5 py-1.5 rounded-full text-xs font-semibold backdrop-blur-md transition-all shadow-sm shrink-0 flex items-center gap-1.5 ${activeCategoryFilter === cat
                 ? 'bg-rose-600 text-white shadow-md'
                 : 'bg-white/95 text-slate-700 border border-slate-200 hover:bg-slate-50'
-            }`}
+              }`}
           >
             <span>{hazardLabel(language, cat)}</span>
-            <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
-              activeCategoryFilter === cat ? 'bg-rose-700 text-white' : 'bg-slate-100 text-slate-600'
-            }`}>
+            <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${activeCategoryFilter === cat ? 'bg-rose-700 text-white' : 'bg-slate-100 text-slate-600'
+              }`}>
               {alerts.filter((a) => a.category === cat).length}
             </span>
           </button>

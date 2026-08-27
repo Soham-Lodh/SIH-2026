@@ -32,15 +32,32 @@ export function createChatRuntime(
   const englishHistoryRef = options.historyRef || { current: [] };
   let isRunning = false;
 
-  const publish = () => options.onMessagesChange?.([...messages]);
+  const subscribers = new Set<() => void>();
+  const notify = () => subscribers.forEach((cb) => cb());
+
+  const publish = () => {
+    options.onMessagesChange?.([...messages]);
+    notify();
+  };
   const setRunning = (value: boolean) => {
     isRunning = value;
     options.onRunningChange?.(value);
+    notify();
   };
 
   const adapter: ExternalStoreAdapter<ThreadMessageLike> = {
-    messages,
-    isRunning,
+    get messages() {
+      return messages;
+    },
+    get isRunning() {
+      return isRunning;
+    },
+    subscribe: (callback) => {
+      subscribers.add(callback);
+      return () => {
+        subscribers.delete(callback);
+      };
+    },
     convertMessage: (message) => message,
     onNew: async (appendMessage) => {
       const userText = messageText(appendMessage);
@@ -53,9 +70,6 @@ export function createChatRuntime(
         content: userText,
       };
       messages = [...messages, userMessage];
-      adapter.messages = messages;
-      publish();
-      adapter.isRunning = true;
       setRunning(true);
       publish();
 
@@ -100,10 +114,8 @@ export function createChatRuntime(
           metadata: sourceMetadata([]),
         }];
       } finally {
-        adapter.messages = messages;
-        adapter.isRunning = false;
-        publish();
         setRunning(false);
+        publish();
       }
     },
   };
