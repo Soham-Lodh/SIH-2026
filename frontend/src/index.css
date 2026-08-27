@@ -1,12 +1,87 @@
 @import "tailwindcss";
 
+@theme {
+  /* ========================================
+     AAPADA DRISHTI — FINAL FIGMA PALETTE
+     ======================================== */
+
+  /* Core colors */
+  --color-map: #747F8D;
+  --color-white: #FFFFFF;
+  --color-text: #0F1B29;
+  --color-icons: #0F1B29;
+  --color-cta: #DDDDDD;
+  --color-icon-holder: #DDDDDD;
+
+  /* Primary brand colors */
+  --color-primary-dark: #0F1B29;
+  --color-primary-medium: #747F8D;
+  --color-primary-light: #DDDDDD;
+  --color-accent-light: #F3F4F5;
+
+  /* Page background */
+  --color-background: #FFFFFF;
+  --color-background-mint: #FFFFFF;
+
+  /* ========================================
+     INDIGO → MAP TO BLUE-GRAY SYSTEM
+     ======================================== */
+
+  --color-indigo-50: #F5F6F7;
+  --color-indigo-100: #EEF0F2;
+  --color-indigo-200: #DDDDDD;
+  --color-indigo-300: #B8BEC5;
+  --color-indigo-400: #9AA2AC;
+  --color-indigo-500: #747F8D;
+  --color-indigo-600: #5F6975;
+  --color-indigo-700: #46515E;
+  --color-indigo-800: #2D3946;
+  --color-indigo-900: #0F1B29;
+  --color-indigo-950: #08111B;
+
+  /* ========================================
+     SLATE → NEUTRAL FIGMA SYSTEM
+     ======================================== */
+
+  --color-slate-50: #FFFFFF;
+  --color-slate-100: #FAFAFA;
+  --color-slate-200: #F3F3F3;
+  --color-slate-300: #DDDDDD;
+  --color-slate-400: #BFC4C9;
+  --color-slate-500: #747F8D;
+  --color-slate-600: #5E6874;
+  --color-slate-700: #46515E;
+  --color-slate-800: #263340;
+  --color-slate-900: #0F1B29;
+  --color-slate-950: #08111B;
+
+  --font-sans: "Bricolage Grotesque", sans-serif;
+}
+
 @keyframes shimmer-slide {
   0% {
     transform: translateX(-100%);
   }
+
   100% {
     transform: translateX(100%);
   }
+}
+
+@keyframes float {
+
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+.animate-float {
+  animation: float 4s ease-in-out infinite;
 }
 
 .skeleton-shimmer {
@@ -25,23 +100,33 @@
 
 /* Professional Polish Leaflet styling */
 .leaflet-container {
-  background-color: #f8fafc !important;
+  background-color: #ECF8F8 !important;
   font-family: inherit;
+}
+
+/* Force hide all Leaflet attribution badges globally */
+.leaflet-control-attribution {
+  display: none !important;
+}
+
+/* Make Lakshadweep islands visible by removing white borders that cover small paths */
+path[id="INLD"] {
+  stroke: none !important;
 }
 
 .leaflet-disaster-tooltip {
   background-color: rgba(255, 255, 255, 0.96) !important;
-  color: #0f172a !important;
-  border: 1px solid #cbd5e1 !important;
+  color: #0F1B29 !important;
+  border: 1px solid #DDDDDD !important;
   border-radius: 10px !important;
-  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.15) !important;
+  box-shadow: 0 10px 25px -5px rgba(15, 27, 41, 0.1) !important;
   padding: 8px 12px !important;
   font-size: 12px !important;
   font-weight: 500 !important;
 }
 
 .leaflet-disaster-tooltip:before {
-  border-top-color: #cbd5e1 !important;
+  border-top-color: #DDDDDD !important;
 }
 
 .custom-disaster-marker {
@@ -52,4 +137,23 @@
 .custom-user-marker {
   background: transparent !important;
   border: none !important;
+}
+
+/* Scrollbar customization */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #ECF8F8;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #DDDDDD;
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #747F8D;
 }

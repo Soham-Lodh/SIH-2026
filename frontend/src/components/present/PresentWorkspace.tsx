@@ -179,12 +179,12 @@ export const PresentWorkspace: React.FC<PresentWorkspaceProps> = ({
   return (
     <div className="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-6">
       {/* Mobile Tab Switcher */}
-      <div className="flex sm:hidden bg-slate-100 p-1 rounded-xl border border-slate-200">
+      <div className="flex sm:hidden bg-white p-1 rounded-xl border border-[#DDDDDD]">
         <button
           type="button"
           onClick={() => setMobileTab('india')}
-          className={`flex-1 py-1.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 ${
-            mobileTab === 'india' ? 'bg-rose-600 text-white shadow-sm' : 'text-slate-600'
+          className={`flex-1 py-1.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+            mobileTab === 'india' ? 'bg-[#0F1B29] text-white shadow-sm' : 'text-[#747F8D]'
           }`}
         >
           <Layers className="w-3.5 h-3.5" />
@@ -193,8 +193,8 @@ export const PresentWorkspace: React.FC<PresentWorkspaceProps> = ({
         <button
           type="button"
           onClick={() => setMobileTab('nearme')}
-          className={`flex-1 py-1.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 ${
-            mobileTab === 'nearme' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600'
+          className={`flex-1 py-1.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+            mobileTab === 'nearme' ? 'bg-[#0F1B29] text-white shadow-sm' : 'text-[#747F8D]'
           }`}
         >
           <MapPin className="w-3.5 h-3.5" />
@@ -206,11 +206,11 @@ export const PresentWorkspace: React.FC<PresentWorkspaceProps> = ({
       <div className={`${mobileTab === 'india' ? 'block' : 'hidden sm:block'} space-y-2`}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Radio className="w-4 h-4 text-rose-500 animate-pulse" />
-            <h2 className="font-bold text-sm sm:text-base text-slate-900">
+            <Radio className="w-4 h-4 text-[#0F1B29] animate-pulse" />
+            <h2 className="font-bold text-sm sm:text-base text-[#0F1B29]">
               {translate(language, 'present.mapTitle')}
             </h2>
-            <span className="text-xs px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 font-mono font-medium border border-slate-200">
+            <span className="text-xs px-2.5 py-0.5 rounded-full bg-[#ECF8F8] text-[#0F1B29] font-mono font-medium border border-[#DDDDDD]">
               {translate(language, 'present.activeHazards', { count: displayAlerts.length })}
             </span>
           </div>
@@ -229,9 +229,9 @@ export const PresentWorkspace: React.FC<PresentWorkspaceProps> = ({
             />
 
             {!userLocation && (
-              <div className="rounded-2xl bg-white border border-dashed border-slate-300 px-4 py-3 shadow-sm flex items-center gap-3">
-                <MapPin className="w-5 h-5 text-indigo-600 shrink-0" />
-                <p className="text-xs text-slate-600 leading-relaxed">
+              <div className="rounded-2xl bg-white border border-dashed border-[#DDDDDD] px-4 py-3 shadow-sm flex items-center gap-3">
+                <MapPin className="w-5 h-5 text-[#0F1B29] shrink-0" />
+                <p className="text-xs text-[#747F8D] leading-relaxed">
                   {translate(language, 'present.locationOptional')}
                 </p>
               </div>

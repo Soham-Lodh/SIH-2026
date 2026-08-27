@@ -32,9 +32,6 @@ import {
   Activity,
   History,
   ShieldCheck,
-  ExternalLink,
-  Download,
-  FileSpreadsheet,
   Printer,
   ChevronDown,
   Filter,
@@ -113,7 +110,6 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
   const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
   const [localVoiceOpen, setLocalVoiceOpen] = useState(false);
   const [activeChatBundle, setActiveChatBundle] = useState<EvidenceBundle | null>(null);
-  const [isDownloadOpen, setIsDownloadOpen] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const activeLiveQueryRef = useRef('');
 
@@ -280,20 +276,20 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
         }),
       });
 
-        const data = await res.json();
-        if (!res.ok) {
-          const message = data?.details || data?.error || 'Failed to retrieve live dossier';
-          if (/no live .*sources/i.test(message)) {
+      const data = await res.json();
+      if (!res.ok) {
+        const message = data?.details || data?.error || 'Failed to retrieve live dossier';
+        if (/no live .*sources/i.test(message)) {
           setSearchError('No matching sources were found for this query. Try a broader disaster name, district, or state.');
-            return;
-          }
-          throw new Error(message);
-        }
-
-        if (data?.noResults || !data?.bundle) {
-          setSearchError(data?.details || 'No sufficiently relevant historical evidence was retrieved. Try a broader disaster name, district, or state.');
           return;
         }
+        throw new Error(message);
+      }
+
+      if (data?.noResults || !data?.bundle) {
+        setSearchError(data?.details || 'No sufficiently relevant historical evidence was retrieved. Try a broader disaster name, district, or state.');
+        return;
+      }
 
       const year = deriveYear(data.bundle);
       const decade: DecadeFilter =
@@ -443,36 +439,38 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
       <div
         key={bundle.id}
         onClick={() => setSelectedBundle(bundle)}
-        className="p-5 sm:p-6 rounded-2xl bg-white border border-slate-200 hover:border-indigo-300 hover:shadow-md shadow-xs transition-all flex flex-col justify-between space-y-4 cursor-pointer group relative"
+        className="p-5 sm:p-6 rounded-2xl bg-white border border-[#DDDDDD] hover:border-[#747F8D] hover:shadow-md transition-all flex flex-col justify-between space-y-4 cursor-pointer group relative"
       >
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-800 border border-indigo-200 text-xs font-mono font-bold">
+              <span className="px-2.5 py-0.5 rounded-full bg-[#ECF8F8] text-[#0F1B29] border border-[#DDDDDD] text-xs font-mono font-bold">
                 {bundle.year}
               </span>
-              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold font-mono uppercase border bg-slate-100 text-slate-700 border-slate-200">
-              {hazardLabel(language, bundle.disasterType)}
+              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold font-mono uppercase border bg-white text-[#0F1B29] border-[#DDDDDD]">
+                {hazardLabel(language, bundle.disasterType)}
               </span>
-              <span className="text-xs text-slate-500 font-medium"><TranslatedText text={bundle.state} language={language} /></span>
+              <span className="text-xs text-[#747F8D] font-medium">
+                <TranslatedText text={bundle.state} language={language} />
+              </span>
             </div>
 
-            <span className="text-[11px] font-mono font-medium px-2 py-0.5 rounded-full bg-slate-50 text-slate-600 border border-slate-200 shrink-0">
+            <span className="text-[11px] font-mono font-medium px-2 py-0.5 rounded-full bg-[#ECF8F8]/50 text-[#0F1B29] border border-[#DDDDDD] shrink-0">
               {translate(language, 'history.sourcesCount', { count: bundle.sources?.length || 0 })}
             </span>
           </div>
 
           <div>
-            <h4 className="font-bold text-base sm:text-lg text-slate-900 group-hover:text-indigo-600 transition-colors leading-snug">
+            <h4 className="font-bold text-base sm:text-lg text-[#0F1B29] group-hover:text-[#747F8D] transition-colors leading-snug">
               <TranslatedText text={bundle.eventName} language={language} />
             </h4>
-            <div className="flex items-center gap-1 text-xs text-slate-500 mt-1">
-              <MapPin className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+            <div className="flex items-center gap-1 text-xs text-[#747F8D] mt-1">
+              <MapPin className="w-3.5 h-3.5 text-[#747F8D] shrink-0" />
               <span>
                 <TranslatedText text={`${bundle.location}, ${bundle.state}`} language={language} />
               </span>
-              <span className="text-slate-300">•</span>
-              <Calendar className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+              <span className="text-[#DDDDDD]">•</span>
+              <Calendar className="w-3.5 h-3.5 text-[#747F8D] shrink-0" />
               <TranslatedText text={bundle.eventDate ? formatDisasterDate(bundle.eventDate) : bundle.dateRange} language={language} />
             </div>
           </div>
@@ -481,41 +479,41 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
         {hasImpactSummary ? (
           <div className={`grid grid-cols-1 ${hasCasualties && hasDamage ? 'sm:grid-cols-2' : ''} gap-2.5 text-xs`}>
             {hasCasualties && (
-              <div className="p-3 rounded-xl bg-rose-50/50 border border-rose-100 space-y-0.5">
-                <span className="text-rose-700 font-bold text-[10px] uppercase flex items-center gap-1">
-                  <Users className="w-3.5 h-3.5 text-rose-600" />
+              <div className="p-3 rounded-xl bg-white border border-[#DDDDDD] space-y-0.5">
+                <span className="text-[#0F1B29] font-bold text-[10px] uppercase flex items-center gap-1">
+                  <Users className="w-3.5 h-3.5 text-[#747F8D]" />
                   <span>{translate(language, 'history.casualties')}</span>
                 </span>
-                <p className="text-slate-800 line-clamp-2 leading-relaxed text-xs font-medium">
+                <p className="text-[#0F1B29] line-clamp-2 leading-relaxed text-xs font-medium">
                   <TranslatedText text={bundle.reportedCasualties} language={language} />
                 </p>
               </div>
             )}
 
             {hasDamage && (
-              <div className="p-3 rounded-xl bg-amber-50/50 border border-amber-100 space-y-0.5">
-                <span className="text-amber-800 font-bold text-[10px] uppercase flex items-center gap-1">
-                  <Building className="w-3.5 h-3.5 text-amber-600" />
+              <div className="p-3 rounded-xl bg-white border border-[#DDDDDD] space-y-0.5">
+                <span className="text-[#0F1B29] font-bold text-[10px] uppercase flex items-center gap-1">
+                  <Building className="w-3.5 h-3.5 text-[#747F8D]" />
                   <span>{translate(language, 'history.damage')}</span>
                 </span>
-                <p className="text-slate-800 line-clamp-2 leading-relaxed text-xs font-medium">
+                <p className="text-[#0F1B29] line-clamp-2 leading-relaxed text-xs font-medium">
                   <TranslatedText text={bundle.reportedDamage} language={language} />
                 </p>
               </div>
             )}
           </div>
         ) : (
-          <div className="flex items-center gap-2 text-[11px] font-semibold text-slate-500">
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+          <div className="flex items-center gap-2 text-[11px] font-semibold text-[#747F8D]">
+            <ShieldCheck className="w-3.5 h-3.5 text-[#747F8D]" />
             <span>{bundle.evidenceStatus}</span>
           </div>
         )}
 
-        <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed">
+        <p className="text-xs text-[#747F8D] line-clamp-2 leading-relaxed">
           <TranslatedText text={bundle.whatHappened} language={language} />
         </p>
 
-        <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-slate-100">
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-[#DDDDDD]">
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -523,11 +521,10 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
                 e.stopPropagation();
                 toggleCompare(bundle);
               }}
-              className={`px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-all ${
-                isSelectedForCompare
-                  ? 'bg-indigo-600 border-indigo-600 text-white shadow-xs'
-                  : 'bg-slate-100 hover:bg-slate-200 border-slate-200 text-slate-700'
-              }`}
+              className={`px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-all ${isSelectedForCompare
+                ? 'bg-[#0F1B29] border-[#0F1B29] text-white'
+                : 'bg-white hover:bg-[#ECF8F8] border-[#DDDDDD] text-[#0F1B29]'
+                }`}
             >
               {isSelectedForCompare ? <Check className="w-3.5 h-3.5 text-white" /> : <Plus className="w-3.5 h-3.5" />}
               <span>{isSelectedForCompare ? translate(language, 'history.inCompare') : translate(language, 'history.addCompare')}</span>
@@ -539,9 +536,9 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
                 e.stopPropagation();
                 handleOpenChatForEvent(bundle);
               }}
-              className="px-2.5 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-xs font-semibold text-indigo-700 flex items-center gap-1 transition-colors"
+              className="px-2.5 py-1.5 rounded-xl bg-[#ECF8F8] hover:bg-[#DDDDDD]/60 border border-[#DDDDDD] text-xs font-semibold text-[#0F1B29] flex items-center gap-1 transition-colors cursor-pointer"
             >
-              <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+              <Sparkles className="w-3.5 h-3.5 text-[#747F8D]" />
               <span>{translate(language, 'history.askAi')}</span>
             </button>
           </div>
@@ -550,13 +547,13 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
             <button
               type="button"
               onClick={(e) => handleCopyCardSummary(bundle, e)}
-              className="p-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-500 hover:text-slate-800 transition-colors"
+              className="p-1.5 rounded-xl bg-white hover:bg-[#ECF8F8] border border-[#DDDDDD] text-[#747F8D] hover:text-[#0F1B29] transition-colors"
               title={translate(language, 'history.copySummary')}
             >
               <Copy className="w-3.5 h-3.5" />
             </button>
 
-            <div className="flex items-center gap-1 text-xs font-bold text-indigo-600 group-hover:text-indigo-800">
+            <div className="flex items-center gap-1 text-xs font-bold text-[#0F1B29] group-hover:text-[#747F8D]">
               <span>{translate(language, 'history.liveDossier')}</span>
               <ArrowRight className="w-4 h-4" />
             </div>
@@ -593,21 +590,21 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
 
   return (
     <div className="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-6">
-      <div className="bg-white border border-slate-200 rounded-2xl p-5 sm:p-6 shadow-sm space-y-5">
+      <div className="bg-white border border-[#DDDDDD] rounded-2xl p-5 sm:p-6 shadow-sm space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="space-y-1">
             <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600">
+              <div className="w-9 h-9 rounded-xl bg-[#ECF8F8] border border-[#DDDDDD] flex items-center justify-center text-[#0F1B29]">
                 <History className="w-5 h-5" />
               </div>
               <div>
-                <h2 className="font-bold text-lg sm:text-xl text-slate-900 flex items-center gap-2">
+                <h2 className="font-bold text-lg sm:text-xl text-[#0F1B29] flex items-center gap-2">
                   <span>Indian Historical Disaster Intelligence Archive</span>
-                  <span className="text-xs px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 font-mono font-bold border border-indigo-100">
+                  <span className="text-xs px-2.5 py-0.5 rounded-full bg-[#ECF8F8] text-[#0F1B29] font-mono font-bold border border-[#DDDDDD]">
                     Current Evidence
                   </span>
                 </h2>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-[#747F8D]">
                   Build a sourced dossier from current evidence and AI synthesis, then compare events or open the evidence view.
                 </p>
               </div>
@@ -615,40 +612,6 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setIsDownloadOpen(!isDownloadOpen)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shadow-xs transition-all cursor-pointer"
-                title="Download report"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Download Report</span>
-                <ChevronDown className="w-3 h-3 ml-0.5 opacity-70" />
-              </button>
-
-              {isDownloadOpen && (
-                <div className="absolute right-0 mt-2 w-56 rounded-2xl bg-white border border-slate-200 shadow-xl p-1.5 z-40 animate-in fade-in zoom-in-95 duration-150 space-y-1">
-                  <div className="px-3 py-1 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                    Export Current Results ({filteredAndSortedEvents.length})
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsDownloadOpen(false);
-                      window.print();
-                    }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-left rounded-xl hover:bg-slate-50 text-slate-700 font-medium transition-colors"
-                  >
-                    <Printer className="w-4 h-4 text-indigo-600 shrink-0" />
-                    <div>
-                      <div className="font-semibold text-slate-900">Print / PDF</div>
-                      <div className="text-[10px] text-slate-500">Browser print view</div>
-                    </div>
-                  </button>
-                </div>
-              )}
-            </div>
 
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold">
               <ShieldCheck className="w-4 h-4" />
@@ -659,7 +622,7 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
 
         <div className="flex flex-col sm:flex-row gap-2">
           <div className="relative flex-1 flex items-center">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 pointer-events-none" />
+            <Search className="w-4 h-4 text-[#747F8D] absolute left-3.5 pointer-events-none" />
             <input
               type="text"
               value={searchQuery}
@@ -671,11 +634,11 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
                 }
               }}
               placeholder={translate(language, 'history.searchPlaceholder')}
-              className="w-full pl-10 pr-20 py-2.5 text-xs sm:text-sm rounded-xl bg-slate-50 border border-slate-200 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+              className="w-full pl-10 pr-20 py-2.5 text-xs sm:text-sm rounded-xl bg-white border border-[#DDDDDD] text-[#0F1B29] placeholder:text-[#747F8D]/60 focus:outline-none focus:border-[#747F8D] focus:ring-2 focus:ring-[#DDDDDD]/40"
             />
             <div className="absolute right-2 flex items-center gap-1">
               {searchQuery && (
-                <button type="button" onClick={() => setSearchQuery('')} className="p-1 text-slate-400 hover:text-slate-600">
+                <button type="button" onClick={() => setSearchQuery('')} className="p-1 text-[#747F8D] hover:text-[#0F1B29]">
                   <X className="w-4 h-4" />
                 </button>
               )}
@@ -696,36 +659,34 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
             type="button"
             disabled={isSearchingLive || !searchQuery.trim()}
             onClick={() => void handleLiveQuerySearch(searchQuery)}
-            className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all shadow-sm shadow-indigo-100 shrink-0"
+            className="px-4 py-2.5 rounded-xl bg-[#0F1B29] hover:bg-[#0f1b29]/90 disabled:opacity-50 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all shadow-sm shrink-0"
             title="Search current evidence and synthesize a dossier"
           >
-            <Sparkles className="w-4 h-4" />
             <span>{isSearchingLive ? 'Synthesizing Archive...' : 'Search Evidence'}</span>
           </button>
         </div>
 
         {searchError && (
           <div
-            className={`p-3 rounded-xl text-xs font-medium ${
-              isNoLiveSourcesMessage(searchError)
-                ? 'border border-amber-200 bg-amber-50 text-amber-800'
-                : 'border border-rose-200 bg-rose-50 text-rose-700'
-            }`}
+            className={`p-3 rounded-xl text-xs font-medium ${isNoLiveSourcesMessage(searchError)
+              ? 'border border-amber-200 bg-amber-50 text-amber-800'
+              : 'border border-rose-200 bg-rose-50 text-rose-700'
+              }`}
           >
             {searchError}
           </div>
         )}
 
-        <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3 text-xs">
+        <div className="pt-2 border-t border-[#DDDDDD] flex flex-wrap items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-2">
-            <span className="font-bold text-slate-500 flex items-center gap-1">
-              <ArrowUpDown className="w-3.5 h-3.5 text-indigo-600" />
+            <span className="font-bold text-[#747F8D] flex items-center gap-1">
+              <ArrowUpDown className="w-3.5 h-3.5 text-[#0F1B29]" />
               <span>Sort Order:</span>
             </span>
             <select
               value={sortOption}
               onChange={(e) => setSortOption(e.target.value as SortOption)}
-              className="px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 font-semibold text-slate-800 focus:outline-none focus:border-indigo-500 cursor-pointer text-xs"
+              className="px-3 py-1.5 rounded-xl bg-white border border-[#DDDDDD] font-semibold text-[#0F1B29] focus:outline-none focus:border-[#747F8D] cursor-pointer text-xs"
             >
               <option value="oldest">Oldest to Recent</option>
               <option value="recent">Most Recent to Oldest</option>
@@ -736,14 +697,14 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="font-bold text-slate-500 flex items-center gap-1">
-              <MapPin className="w-3.5 h-3.5 text-indigo-600" />
+            <span className="font-bold text-[#747F8D] flex items-center gap-1">
+              <MapPin className="w-3.5 h-3.5 text-[#0F1B29]" />
               <span>State:</span>
             </span>
             <select
               value={selectedState}
               onChange={(e) => setSelectedState(e.target.value)}
-              className="px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 font-semibold text-slate-800 focus:outline-none focus:border-indigo-500 cursor-pointer text-xs"
+              className="px-3 py-1.5 rounded-xl bg-white border border-[#DDDDDD] font-semibold text-[#0F1B29] focus:outline-none focus:border-[#747F8D] cursor-pointer text-xs"
             >
               {STATES.map((state) => (
                 <option key={state} value={state}>
@@ -759,11 +720,10 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
                 key={decade}
                 type="button"
                 onClick={() => setSelectedDecade(decade)}
-                className={`px-2.5 py-1 rounded-lg font-semibold text-[11px] transition-colors ${
-                  selectedDecade === decade
-                    ? 'bg-white text-indigo-700 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
+                className={`px-2.5 py-1 rounded-lg font-semibold text-[11px] transition-colors ${selectedDecade === decade
+                  ? 'bg-[#0F1B29] text-white shadow-xs'
+                  : 'text-[#747F8D] hover:text-[#0F1B29]'
+                  }`}
               >
                 {decade === 'all' ? 'All Eras' : decade}
               </button>
@@ -780,11 +740,10 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
                 key={cat.value}
                 type="button"
                 onClick={() => setSelectedCategory(cat.value)}
-                className={`px-3 py-1.5 rounded-xl border text-xs font-semibold whitespace-nowrap flex items-center gap-1.5 transition-all ${
-                  isSelected
-                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
-                    : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
-                }`}
+                className={`px-3 py-1.5 rounded-xl border text-xs font-semibold whitespace-nowrap flex items-center gap-1.5 transition-all ${isSelected
+                  ? 'bg-[#0F1B29] text-white border-[#0F1B29] shadow-xs'
+                  : 'bg-white hover:bg-[#ECF8F8] text-[#0F1B29] border-[#DDDDDD]'
+                  }`}
               >
                 <Icon className="w-3.5 h-3.5" />
                 <span>{cat.label}</span>
@@ -793,11 +752,11 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
           })}
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3">
-          <div className="text-xs text-slate-500">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#DDDDDD] pt-3">
+          <div className="text-xs text-[#747F8D]">
             {selectedCategory !== appliedFilters.category ||
-            selectedState !== appliedFilters.state ||
-            selectedDecade !== appliedFilters.decade ? (
+              selectedState !== appliedFilters.state ||
+              selectedDecade !== appliedFilters.decade ? (
               <span>Filter selections are ready. Apply them to run a fresh evidence search.</span>
             ) : (
               <span>Results reflect the last applied filter set.</span>
@@ -807,7 +766,7 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
             type="button"
             onClick={() => void handleApplyFilters()}
             disabled={isApplyingFilter || isArchiveLoading}
-            className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-xs flex items-center gap-2 shadow-sm shadow-indigo-100 transition-colors"
+            className="px-4 py-2 rounded-xl bg-[#0F1B29] hover:bg-[#0f1b29]/90 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-xs flex items-center gap-2 shadow-sm transition-colors"
             aria-label="Apply Filter"
           >
             <Filter className={`w-4 h-4 ${isApplyingFilter ? 'animate-pulse' : ''}`} />
@@ -824,7 +783,7 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
 
       <div className="flex items-center justify-between text-xs text-slate-500">
         <div className="flex items-center gap-2 font-medium">
-          <span className="font-bold text-slate-900 text-sm">
+          <span className="font-bold text-[#0F1B29] text-sm">
             {filteredAndSortedEvents.length > 0
               ? `Showing ${filteredAndSortedEvents.length} live dossiers`
               : 'No dossiers loaded yet'}
@@ -833,31 +792,31 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
 
         {(searchQuery || selectedCategory !== 'all' || selectedState !== 'All States' || selectedDecade !== 'all' ||
           appliedFilters.category !== 'all' || appliedFilters.state !== 'All States' || appliedFilters.decade !== 'all') && (
-          <button
-            type="button"
-            onClick={() => void handleResetFilters()}
-            className="text-indigo-600 hover:text-indigo-800 font-semibold underline"
-          >
-            Reset All Filters
-          </button>
-        )}
+            <button
+              type="button"
+              onClick={() => void handleResetFilters()}
+              className="text-[#0F1B29] hover:text-[#747F8D] font-semibold underline"
+            >
+              Reset All Filters
+            </button>
+          )}
       </div>
 
       {(isArchiveLoading || isSearchingLive) && <EventCardSkeleton />}
 
       {filteredAndSortedEvents.length === 0 && !isArchiveLoading && !isSearchingLive ? (
-        <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center space-y-3 shadow-sm">
-          <div className="mx-auto w-12 h-12 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600">
+        <div className="rounded-2xl border border-dashed border-[#DDDDDD] bg-white p-8 text-center space-y-3 shadow-sm">
+          <div className="mx-auto w-12 h-12 rounded-2xl bg-[#ECF8F8] border border-[#DDDDDD] flex items-center justify-center text-[#0F1B29]">
             <Sparkles className="w-5 h-5" />
           </div>
-          <h3 className="font-bold text-slate-900">
+          <h3 className="font-bold text-[#0F1B29]">
             {archiveError
               ? 'Live archive is temporarily unavailable'
               : appliedFilters.category !== 'all' || appliedFilters.state !== 'All States' || appliedFilters.decade !== 'all'
                 ? 'No matching live records were found'
                 : 'No dossier yet'}
           </h3>
-          <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
+          <p className="text-xs text-[#747F8D] max-w-md mx-auto leading-relaxed">
             {archiveError
               ? 'The live source did not respond. Try Apply Filter again or use Search Evidence; no placeholder records were inserted.'
               : appliedFilters.category !== 'all' || appliedFilters.state !== 'All States' || appliedFilters.decade !== 'all'
@@ -872,14 +831,14 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
       )}
 
       {compareList.length > 0 && (
-        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 bg-white border border-indigo-200 rounded-2xl p-3 sm:p-4 shadow-2xl flex items-center gap-4 animate-in slide-in-from-bottom-5">
+        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 bg-white border border-[#DDDDDD] rounded-2xl p-3 sm:p-4 shadow-2xl flex items-center gap-4 animate-in slide-in-from-bottom-5">
           <div className="flex items-center gap-2">
-            <Scale className="w-5 h-5 text-indigo-600" />
+            <Scale className="w-5 h-5 text-[#747F8D]" />
             <div className="text-xs">
-              <span className="font-bold text-slate-900 block">
+              <span className="font-bold text-[#0F1B29] block">
                 {compareList.length} Disaster Events Selected
               </span>
-              <span className="text-[11px] text-slate-500">
+              <span className="text-[11px] text-[#747F8D]">
                 {compareList.length < 2 ? 'Select 1 more event to launch comparison matrix' : 'Ready for cross-event matrix analysis'}
               </span>
             </div>
@@ -890,7 +849,7 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
               type="button"
               disabled={compareList.length < 2}
               onClick={() => setIsCompareModalOpen(true)}
-              className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs shadow-sm transition-all flex items-center gap-1.5"
+              className="px-4 py-2 rounded-xl bg-[#0F1B29] hover:bg-[#0f1b29]/90 disabled:opacity-50 text-white font-bold text-xs shadow-sm transition-all flex items-center gap-1.5"
             >
               <span>{t.compareNow}</span>
               <ArrowRight className="w-3.5 h-3.5" />
@@ -899,7 +858,7 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
             <button
               type="button"
               onClick={() => setCompareList([])}
-              className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-800 transition-colors"
+              className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-[#747F8D] hover:text-[#0F1B29] transition-colors"
               title="Clear Selection"
             >
               <X className="w-4 h-4" />
