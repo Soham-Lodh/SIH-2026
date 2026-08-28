@@ -2,12 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import {
   Calendar,
-  X,
-  MapPin,
-  Activity,
   AlertCircle,
-  Waves,
 } from 'lucide-react';
+import { translate } from '../../types/language';
+import { LRUCache } from '../../lib/lruCache';
+import { FuturePredictionDrawer } from './FuturePredictionDrawer';
 
 interface FuturePageProps {
   currentLanguage: string;
@@ -48,12 +47,24 @@ const MONTH_NUMBER: Record<string, number> = {
   DEC: 12,
 };
 
+// Instantiate the LRU Cache at module level to persist across navigation
+const forecastCache = new LRUCache<number, FloodPrediction[]>(10, 5 * 60 * 1000); // capacity = 10, TTL = 5 mins
+
+function formatMonthLabel(language: string, code: string, year: number): string {
+  const monthNames: Record<string, Record<string, string>> = {
+    en: { SEP: 'Sep', OCT: 'Oct', NOV: 'Nov', DEC: 'Dec', JAN: 'Jan', FEB: 'Feb', MAR: 'Mar', APR: 'Apr', MAY: 'May', JUN: 'Jun', JUL: 'Jul', AUG: 'Aug' },
+    hi: { SEP: 'सितंबर', OCT: 'अक्टूबर', NOV: 'नवंबर', DEC: 'दिसंबर', JAN: 'जनवरी', FEB: 'फरवरी', MAR: 'मार्च', APR: 'अप्रैल', MAY: 'मई', JUN: 'जून', JUL: 'जुलाई', AUG: 'अगस्त' },
+    bn: { SEP: 'সেপ্টেম্বর', OCT: 'অক্টোবর', NOV: 'নভেম্বর', DEC: 'ডিসেম্বর', JAN: 'জানুয়ারি', FEB: 'ফেব্রুয়ারি', MAR: 'মার্চ', APR: 'এপ্রিল', MAY: 'মে', JUN: 'জুন', JUL: 'জুলাই', AUG: 'আগস্ট' },
+  };
+  const name = monthNames[language]?.[code] || monthNames.en[code] || code;
+  return `${name} ${year}`;
+}
+
 export const FuturePage: React.FC<FuturePageProps> = ({
   currentLanguage,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
-
   const markersLayerRef = useRef<L.LayerGroup | null>(null);
 
   const monthsList = [
@@ -132,13 +143,21 @@ export const FuturePage: React.FC<FuturePageProps> = ({
     const monthNumber = MONTH_NUMBER[monthCode];
 
     if (!monthNumber) {
-      setError('Invalid forecast month.');
+      setError(translate(currentLanguage, 'future.unavailable'));
       return;
     }
 
     setLoading(true);
     setError(null);
     setSelectedPrediction(null);
+
+    // Try retrieving from LRU Cache first
+    const cached = forecastCache.get(monthNumber);
+    if (cached) {
+      setPredictions(cached);
+      setLoading(false);
+      return;
+    }
 
     try {
       const response = await fetch(
@@ -174,6 +193,7 @@ export const FuturePage: React.FC<FuturePageProps> = ({
       const data: FloodPredictionResponse =
         await response.json();
 
+      forecastCache.put(monthNumber, data.predictions);
       setPredictions(data.predictions);
     } catch (err) {
       console.error('ML forecast fetch failed:', err);
@@ -230,30 +250,39 @@ export const FuturePage: React.FC<FuturePageProps> = ({
     }
 
     predictions.forEach((prediction) => {
-      const probability =
-        prediction.flood_probability_percent;
+      const probability = prediction.flood_probability_percent;
+      const isSelected = selectedPrediction?.rank === prediction.rank;
+      const isHighRisk = probability >= 80;
+      const isMediumRisk = probability >= 50 && probability < 80;
 
-      /*
-       * Marker radius scales slightly with probability so that
-       * higher-risk predicted locations stand out.
-       */
-      const radius = Math.max(
-        7,
-        Math.min(13, 7 + probability / 20)
-      );
+      const strokeColor = isSelected ? '#4f46e5' : '#0F1B29';
+      const fillColor = isSelected ? '#e0e7ff' : '#EEF0F2';
+      const ringClass = isSelected
+        ? 'ring-4 ring-indigo-300 ring-offset-2'
+        : 'ring-2 ring-slate-200';
 
-      const marker = L.circleMarker(
-        [
-          prediction.latitude,
-          prediction.longitude,
-        ],
-        {
-          radius,
-          weight: 2,
-          opacity: 1,
-          fillOpacity: 0.8,
-        }
-      );
+      const iconHtml = `
+        <div class="relative group cursor-pointer flex flex-col items-center">
+          <div class="w-8 h-8 rounded-2xl bg-white shadow-md flex items-center justify-center ${ringClass} transition-transform hover:scale-110" style="border: 2px solid ${strokeColor};">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#0F1B29" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="filter drop-shadow-sm">
+              <path d="M18.4 12A6 6 0 1 0 7.2 9H6a7 7 0 0 0-1 13.9" fill="#0F1B29" fill-opacity="0.1"/>
+              <path d="M18.4 12A6 6 0 1 0 7.2 9H6a7 7 0 0 0-1 13.9M12 17l-2 3M16 17l-2 3M8 17l-2 3" stroke-width="2" />
+            </svg>
+          </div>
+          <div class="mt-1.5 px-2 py-0.5 rounded-full text-[8px] font-extrabold tracking-tight whitespace-nowrap shadow-sm" style="background-color: ${fillColor}; border: 1.5px solid ${strokeColor}; color: ${strokeColor};">
+            ${probability.toFixed(0)}% Risk
+          </div>
+        </div>
+      `;
+
+      const customIcon = L.divIcon({
+        html: iconHtml,
+        className: 'custom-disaster-marker',
+        iconSize: [34, 42],
+        iconAnchor: [17, 21],
+      });
+
+      const marker = L.marker([prediction.latitude, prediction.longitude], { icon: customIcon });
 
       marker.bindTooltip(
         `
@@ -265,7 +294,8 @@ export const FuturePage: React.FC<FuturePageProps> = ({
         `,
         {
           direction: 'top',
-          offset: [0, -8],
+          offset: [0, -12],
+          className: 'leaflet-disaster-tooltip',
         }
       );
 
@@ -286,7 +316,7 @@ export const FuturePage: React.FC<FuturePageProps> = ({
 
       marker.addTo(markersLayer);
     });
-  }, [predictions]);
+  }, [predictions, selectedPrediction]);
 
   // ============================================================
   // CLOSE DETAIL SIDEBAR
@@ -297,7 +327,7 @@ export const FuturePage: React.FC<FuturePageProps> = ({
   };
 
   return (
-    <div className="w-full h-full bg-[#ECF8F8] text-[#0F1B29] flex flex-col md:flex-row font-sans select-none overflow-hidden">
+    <div className="w-full h-full bg-[#ECF8F8] text-[#0F1B29] flex flex-col md:flex-row font-sans select-none overflow-hidden animate-in fade-in duration-200">
 
       {/* ======================================================
           LEFT SIDEBAR - FORECAST TIMELINE
@@ -310,12 +340,11 @@ export const FuturePage: React.FC<FuturePageProps> = ({
           <div>
             <h2 className="text-[#0F1B29] font-bold text-xs uppercase tracking-wider flex items-center gap-1.5">
               <Calendar className="w-4 h-4 text-[#747F8D]" />
-              <span>Forecast Timeline</span>
+              <span>{translate(currentLanguage, 'future.timelineTitle')}</span>
             </h2>
 
-            <p className="text-[10px] text-[#747F8D] mt-0.5">
-              Select a forecast month to generate
-              predicted flood locations.
+            <p className="text-[10px] text-[#747F8D] mt-0.5 font-semibold">
+              {translate(currentLanguage, 'future.timelineSubtitle')}
             </p>
           </div>
 
@@ -362,7 +391,7 @@ export const FuturePage: React.FC<FuturePageProps> = ({
                   </div>
 
                   <span className="md:ml-3">
-                    {month.label}
+                    {formatMonthLabel(currentLanguage, month.code, month.year)}
                   </span>
 
                   {isSelected && (
@@ -387,35 +416,6 @@ export const FuturePage: React.FC<FuturePageProps> = ({
         />
 
         {/* ==================================================
-            MAP HEADER
-        ================================================== */}
-
-        <div className="absolute top-4 left-4 z-20 bg-white/95 backdrop-blur-sm border border-[#DDDDDD] rounded-lg shadow-sm px-4 py-3">
-
-          <div className="flex items-center gap-2">
-
-            <Waves className="w-4 h-4 text-[#0F1B29]" />
-
-            <div>
-              <p className="text-xs font-bold uppercase tracking-wider">
-                Flood Risk Forecast
-              </p>
-
-              <p className="text-[10px] text-[#747F8D]">
-                {selectedMonth.label}
-              </p>
-            </div>
-
-          </div>
-
-          <div className="mt-2 text-[10px] text-[#747F8D]">
-            {loading
-              ? 'Calculating predictions...'
-              : `${predictions.length} high-risk locations predicted`}
-          </div>
-        </div>
-
-        {/* ==================================================
             LOADING
         ================================================== */}
 
@@ -427,7 +427,7 @@ export const FuturePage: React.FC<FuturePageProps> = ({
                 <div className="w-4 h-4 border-2 border-[#0F1B29] border-t-transparent rounded-full animate-spin" />
 
                 <span className="text-xs font-semibold">
-                  Generating flood predictions...
+                  {translate(currentLanguage, 'future.generating')}
                 </span>
 
               </div>
@@ -448,7 +448,7 @@ export const FuturePage: React.FC<FuturePageProps> = ({
 
               <div>
                 <p className="text-xs font-bold">
-                  Prediction unavailable
+                  {translate(currentLanguage, 'future.unavailable')}
                 </p>
 
                 <p className="text-[10px] text-[#747F8D] mt-1">
@@ -461,262 +461,16 @@ export const FuturePage: React.FC<FuturePageProps> = ({
         )}
 
         {/* ==================================================
-            SELECTED PREDICTION SIDEBAR
+            SELECTED PREDICTION DRAWER
         ================================================== */}
 
         {selectedPrediction && (
-          <div className="absolute top-0 right-0 bottom-0 w-full sm:w-[370px] z-30 bg-white border-l border-[#DDDDDD] shadow-2xl flex flex-col">
-
-            {/* Header */}
-
-            <div className="p-5 border-b border-[#DDDDDD] flex items-start justify-between">
-
-              <div>
-
-                <div className="flex items-center gap-2">
-
-                  <MapPin className="w-4 h-4 text-[#0F1B29]" />
-
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-[#747F8D]">
-                    Predicted Flood Location
-                  </span>
-
-                </div>
-
-                <h3 className="text-xl font-bold mt-2">
-                  Rank #{selectedPrediction.rank}
-                </h3>
-
-                <p className="text-xs text-[#747F8D] mt-1">
-                  {selectedMonth.label}
-                </p>
-
-              </div>
-
-              <button
-                type="button"
-                onClick={closePredictionPanel}
-                className="w-8 h-8 rounded-md flex items-center justify-center hover:bg-[#ECF8F8] transition-colors"
-              >
-                <X className="w-4 h-4" />
-              </button>
-
-            </div>
-
-            {/* Content */}
-
-            <div className="p-5 overflow-y-auto flex-1">
-
-              {/* Flood probability */}
-
-              <div className="border border-[#DDDDDD] rounded-lg p-4">
-
-                <div className="flex justify-between items-center">
-
-                  <div className="flex items-center gap-2">
-                    <Activity className="w-4 h-4" />
-                    <span className="text-xs font-bold">
-                      Flood Probability
-                    </span>
-                  </div>
-
-                  <span className="text-2xl font-bold">
-                    {selectedPrediction.flood_probability_percent.toFixed(
-                      2
-                    )}
-                    %
-                  </span>
-
-                </div>
-
-                <div className="mt-3 h-2 bg-[#ECF8F8] rounded-full overflow-hidden">
-
-                  <div
-                    className="h-full bg-[#0F1B29] rounded-full transition-all"
-                    style={{
-                      width: `${Math.min(
-                        100,
-                        selectedPrediction.flood_probability_percent
-                      )}%`,
-                    }}
-                  />
-
-                </div>
-
-                <p className="text-[10px] text-[#747F8D] mt-2">
-                  Model-estimated probability that this
-                  location belongs to the flood-observed
-                  class for the selected month.
-                </p>
-
-              </div>
-
-              {/* Coordinates */}
-
-              <div className="mt-4">
-
-                <p className="text-[10px] font-bold uppercase tracking-wider text-[#747F8D]">
-                  Coordinates
-                </p>
-
-                <div className="grid grid-cols-2 gap-3 mt-2">
-
-                  <div className="bg-[#ECF8F8] rounded-lg p-3">
-                    <p className="text-[9px] text-[#747F8D]">
-                      Latitude
-                    </p>
-
-                    <p className="text-sm font-bold mt-1">
-                      {selectedPrediction.latitude.toFixed(
-                        6
-                      )}
-                    </p>
-                  </div>
-
-                  <div className="bg-[#ECF8F8] rounded-lg p-3">
-                    <p className="text-[9px] text-[#747F8D]">
-                      Longitude
-                    </p>
-
-                    <p className="text-sm font-bold mt-1">
-                      {selectedPrediction.longitude.toFixed(
-                        6
-                      )}
-                    </p>
-                  </div>
-
-                </div>
-              </div>
-
-              {/* Severity */}
-
-              <div className="mt-5">
-
-                <p className="text-[10px] font-bold uppercase tracking-wider text-[#747F8D]">
-                  Predicted Severity
-                </p>
-
-                <div className="space-y-2 mt-2">
-
-                  <div className="flex items-center justify-between border border-[#DDDDDD] rounded-lg p-3">
-
-                    <span className="text-xs">
-                      Peak Flood Level
-                    </span>
-
-                    <span className="font-bold">
-                      {selectedPrediction.peak_flood_level_m.toFixed(
-                        2
-                      )}{' '}
-                      m
-                    </span>
-
-                  </div>
-
-                  <div className="flex items-center justify-between border border-[#DDDDDD] rounded-lg p-3">
-
-                    <span className="text-xs">
-                      Warning Level
-                    </span>
-
-                    <span className="font-bold">
-                      {selectedPrediction.warning_level.toFixed(
-                        2
-                      )}
-                    </span>
-
-                  </div>
-
-                  <div className="flex items-center justify-between border border-[#DDDDDD] rounded-lg p-3">
-
-                    <span className="text-xs">
-                      Danger Level
-                    </span>
-
-                    <span className="font-bold">
-                      {selectedPrediction.danger_level.toFixed(
-                        2
-                      )}
-                    </span>
-
-                  </div>
-
-                </div>
-              </div>
-
-              {/* Historical observations */}
-
-              {typeof selectedPrediction.historical_observations ===
-                'number' && (
-                <div className="mt-5">
-
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-[#747F8D]">
-                    Historical Evidence
-                  </p>
-
-                  <div className="mt-2 border border-[#DDDDDD] rounded-lg p-4">
-
-                    <p className="text-2xl font-bold">
-                      {selectedPrediction.historical_observations}
-                    </p>
-
-                    <p className="text-[10px] text-[#747F8D] mt-1">
-                      Historical observations associated
-                      with this candidate location.
-                    </p>
-
-                  </div>
-                </div>
-              )}
-
-              {/* Model disclaimer */}
-
-              <div className="mt-5 bg-[#ECF8F8] rounded-lg p-4">
-
-                <p className="text-[10px] font-bold">
-                  Model interpretation
-                </p>
-
-                <p className="text-[10px] leading-relaxed text-[#747F8D] mt-1">
-                  The probability is the XGBoost model's
-                  estimated probability for the flood-observed
-                  class. It is a model score and should not be
-                  interpreted as a guaranteed real-world
-                  probability without probability calibration.
-                </p>
-
-              </div>
-
-            </div>
-          </div>
-        )}
-
-        {/* ==================================================
-            POINT COUNT
-        ================================================== */}
-
-        {!selectedPrediction && !loading && predictions.length > 0 && (
-          <div className="absolute bottom-5 left-5 z-20 bg-white/95 backdrop-blur-sm border border-[#DDDDDD] rounded-lg shadow-sm px-4 py-3">
-
-            <div className="flex items-center gap-3">
-
-              <div className="w-8 h-8 rounded-full bg-[#0F1B29] text-white flex items-center justify-center text-xs font-bold">
-                {predictions.length}
-              </div>
-
-              <div>
-                <p className="text-xs font-bold">
-                  Predicted Locations
-                </p>
-
-                <p className="text-[10px] text-[#747F8D]">
-                  Click any point for details
-                </p>
-              </div>
-
-            </div>
-
-          </div>
+          <FuturePredictionDrawer
+            prediction={selectedPrediction}
+            selectedMonthLabel={formatMonthLabel(currentLanguage, selectedMonth.code, selectedMonth.year)}
+            onClose={closePredictionPanel}
+            language={currentLanguage}
+          />
         )}
 
       </div>

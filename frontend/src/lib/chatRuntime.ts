@@ -52,6 +52,7 @@ export function createChatRuntime(
     get isRunning() {
       return isRunning;
     },
+    // @ts-expect-error subscribe is not defined in ExternalStoreAdapter
     subscribe: (callback) => {
       subscribers.add(callback);
       return () => {
