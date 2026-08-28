@@ -242,7 +242,7 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
           <div>
             <h3 className="font-bold text-sm text-[#0F1B29] flex items-center gap-1.5">
               <span>{t.voiceAssistantTitle}</span>
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#ECF8F8] text-[#0F1B29] border border-[#DDDDDD] font-semibold">{activeLangObj.name}</span>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#ECF8F8] text-[#0F1B29] border border-[#DDDDDD] font-semibold notranslate" translate="no">{activeLangObj.name}</span>
             </h3>
             <p className="text-[11px] text-[#747F8D]">{translate(language, 'assistant.grounded')}</p>
           </div>

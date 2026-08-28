@@ -78,7 +78,7 @@ function normalizeLanguageCode(lang?: string): string {
     english: 'en', hindi: 'hi', bengali: 'bn', bangla: 'bn', telugu: 'te', marathi: 'mr',
     tamil: 'ta', urdu: 'ur', gujarati: 'gu', kannada: 'kn', odia: 'or', oriya: 'or',
     malayalam: 'ml', punjabi: 'pa', assamese: 'as', maithili: 'mai', nepali: 'ne',
-    konkani: 'kok', sindhi: 'sd', dogri: 'doi', manipuri: 'mni', bodo: 'brx', sanskrit: 'sa',
+    konkani: 'kok', sindhi: 'sd', dogri: 'doi', manipuri: 'mni', bodo: 'brx',
   };
   return aliases[code] || code.split('-')[0];
 }

@@ -82,9 +82,9 @@ export const Navbar: React.FC<NavbarProps> = ({
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
         
         {/* Logo and Application Name */}
-        <div className="flex items-center gap-2 cursor-pointer select-none" onClick={() => onRouteChange('/')}>
+        <div className="flex items-center gap-2 cursor-pointer select-none notranslate" translate="no" onClick={() => onRouteChange('/')}>
           <img src="/favicon.svg" className="w-8 h-8 rounded-lg border border-[#DDDDDD]/40" alt="Logo" />
-          <span className="font-bold text-sm text-[#0F1B29] tracking-wider leading-none flex flex-col uppercase font-sans">
+          <span className="font-bold text-sm text-[#0F1B29] tracking-wider leading-none flex flex-col uppercase font-sans notranslate" translate="no">
             <span>Aapda</span>
             <span>Drishti</span>
           </span>
@@ -116,7 +116,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         {/* Right side controls */}
         <div className="hidden md:flex items-center gap-2.5">
           {/* Language Selector */}
-          <div className="relative" ref={dropdownRef}>
+          <div className="relative notranslate" translate="no" ref={dropdownRef}>
             <button
               type="button"
               onClick={() => setIsLangOpen(!isLangOpen)}
@@ -256,7 +256,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           <div className="pt-2 border-t border-[#DDDDDD]/60 flex items-center justify-between">
             {/* Mobile Language Selector */}
-            <div className="relative">
+            <div className="relative notranslate" translate="no">
               <button
                 type="button"
                 onClick={() => setIsLangOpen(!isLangOpen)}

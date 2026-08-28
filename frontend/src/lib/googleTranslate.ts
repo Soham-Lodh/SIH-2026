@@ -92,39 +92,72 @@ async function requestTranslations(texts: string[], targetLang: string, sourceLa
   return output;
 }
 
+const PROTECTED_BRANDS = [
+  'AapdaDrishti',
+  'Aapda Drishti',
+  'AAPDA DRISHTI',
+  'Aapada Drishti',
+  'AapadaDrishti',
+  'AAPDADRISHTI',
+];
+
+function protectBrandNames(text: string): { protectedText: string; tokens: Map<string, string> } {
+  let result = text;
+  const tokens = new Map<string, string>();
+  PROTECTED_BRANDS.forEach((brand, idx) => {
+    if (result.includes(brand)) {
+      const token = `__BRAND_TOKEN_${idx}__`;
+      tokens.set(token, brand);
+      result = result.replaceAll(brand, token);
+    }
+  });
+  return { protectedText: result, tokens };
+}
+
+function restoreBrandNames(text: string, tokens: Map<string, string>): string {
+  let result = text;
+  tokens.forEach((brand, token) => {
+    result = result.replaceAll(token, brand);
+  });
+  return result;
+}
+
 export async function translateText(text: string, targetLang: string, sourceLang = 'en'): Promise<string> {
   if (!text || targetLang === sourceLang) return text;
-  const cacheKey = `${sourceLang}:${targetLang}:${text}`;
+  const { protectedText, tokens } = protectBrandNames(text);
+  const cacheKey = `${sourceLang}:${targetLang}:${protectedText}`;
   const cached = cache.get(cacheKey);
   if (cached !== undefined) {
     cache.delete(cacheKey);
     cache.set(cacheKey, cached);
-    return cached;
+    return restoreBrandNames(cached, tokens);
   }
 
-  const [translated] = await requestTranslations([text,], targetLang, sourceLang);
-  return remember(cacheKey, translated || text);
+  const [translated] = await requestTranslations([protectedText], targetLang, sourceLang);
+  const finalResult = restoreBrandNames(translated || protectedText, tokens);
+  return remember(cacheKey, finalResult);
 }
 
 export async function translateBatch(texts: string[], targetLang: string, sourceLang = 'en'): Promise<string[]> {
   if (texts.length === 0 || targetLang === sourceLang) return texts;
 
+  const protectedEntries = texts.map((t) => protectBrandNames(t));
   const output = new Array<string>(texts.length);
   const missing: Array<{ index: number; text: string; key: string }> = [];
 
-  texts.forEach((text, index) => {
-    if (!text) {
-      output[index] = text;
+  protectedEntries.forEach(({ protectedText }, index) => {
+    if (!protectedText) {
+      output[index] = protectedText;
       return;
     }
-    const key = `${sourceLang}:${targetLang}:${text}`;
+    const key = `${sourceLang}:${targetLang}:${protectedText}`;
     const cached = cache.get(key);
     if (cached !== undefined) {
       output[index] = cached;
       cache.delete(key);
       cache.set(key, cached);
     } else {
-      missing.push({ index, text, key });
+      missing.push({ index, text: protectedText, key });
     }
   });
 
@@ -136,7 +169,10 @@ export async function translateBatch(texts: string[], targetLang: string, source
     });
   }
 
-  return output.map((text, index) => text ?? texts[index]);
+  return output.map((res, index) => {
+    const textRes = res ?? protectedEntries[index].protectedText;
+    return restoreBrandNames(textRes, protectedEntries[index].tokens);
+  });
 }
 
 export async function translatePreservingCitations(text: string, targetLang: string, sourceLang = 'en'): Promise<string> {

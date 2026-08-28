@@ -41,7 +41,7 @@ export const TeamPage: React.FC = () => {
       role: 'UI/UX & Frontend Engineer',
       photo: 'https://res.cloudinary.com/ub4y3cag/image/upload/v1787889486/f4a9f840-4375-4a51-bdb9-8abdce717627.jpg ',
       location: 'Bhagalpur, Bihar',
-      bio: 'Crafts responsive Figma-faithful UI interfaces, animation transitions.',
+      bio: 'Hi! I’m curious, slightly competitive, and always up for trying something new…even if I have no idea what I’m doing at first.',
       isLead: false,
     },
     {
@@ -81,7 +81,7 @@ export const TeamPage: React.FC = () => {
             <span>Development Team</span>
           </div>
           <h1 className="text-3xl sm:text-4xl font-bold text-[#0F1B29] tracking-tight">
-            Meet the Builders of AapdaDrishti
+            Meet the Builders of <span className="notranslate" translate="no">AapdaDrishti</span>
           </h1>
           <p className="text-sm text-[#747F8D] max-w-lg mx-auto">
             Combining machine learning, geospatial analysis, and localized web access into India's premier disaster intelligence platform.

@@ -29,7 +29,6 @@ export const INDIAN_LANGUAGES: Language[] = [
   { code: 'doi', name: 'Dogri', nativeName: 'डोगरी', speechLocale: 'hi-IN', script: 'Devanagari' },
   { code: 'mni', name: 'Manipuri (Meitei)', nativeName: 'মৈতৈলোন্', speechLocale: 'bn-IN', script: 'Meetei Mayek' },
   { code: 'brx', name: 'Bodo', nativeName: 'बड़ो', speechLocale: 'hi-IN', script: 'Devanagari' },
-  { code: 'sa', name: 'Sanskrit', nativeName: 'संस्कृतम्', speechLocale: 'hi-IN', script: 'Devanagari' },
 ];
 
 export interface TranslationDictionary {
