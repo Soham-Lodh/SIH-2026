@@ -5,6 +5,26 @@ import { getTranslation } from '../../types/language';
 import { apiUrl } from '../../lib/api';
 import { translateComparison } from '../../lib/googleTranslate';
 import { formatDisasterDate } from '../../lib/dateFormat';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+
+function formatMarkdownPoints(text: string | undefined | null): string {
+  if (!text) return '';
+  let formatted = text.trim();
+  if (formatted.startsWith('•')) {
+    formatted = '- ' + formatted.slice(1);
+  }
+  formatted = formatted.replace(/\s*[•●]\s*/g, '\n\n- ');
+  formatted = formatted.replace(/\s+(\d+)\.\s+/g, '\n\n$1. ');
+  return formatted;
+}
+
+const markdownComponents = {
+  ul: ({ ...props }: any) => <ul className="list-disc pl-4 my-1.5 space-y-1 text-slate-700" {...props} />,
+  ol: ({ ...props }: any) => <ol className="list-decimal pl-4 my-1.5 space-y-1 text-slate-700" {...props} />,
+  li: ({ ...props }: any) => <li className="text-slate-700 leading-relaxed text-xs" {...props} />,
+  p: ({ ...props }: any) => <p className="my-1 leading-relaxed text-xs text-slate-700" {...props} />,
+};
 
 interface CompareModalProps {
   bundles: EvidenceBundle[];
@@ -91,15 +111,21 @@ export const CompareModal: React.FC<CompareModalProps> = ({
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
                   <div className="space-y-1">
                     <h5 className="font-bold text-slate-900">Scale of Impact:</h5>
-                    <p className="text-slate-700 leading-relaxed">{comparisonData.aiSynthesis?.broaderImpact}</p>
+                    <div className="prose prose-xs text-slate-700 leading-relaxed max-w-none prose-headings:text-slate-900 prose-a:text-indigo-700 prose-code:text-slate-900">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{formatMarkdownPoints(comparisonData.aiSynthesis?.broaderImpact)}</ReactMarkdown>
+                    </div>
                   </div>
                   <div className="space-y-1">
                     <h5 className="font-bold text-slate-900">Response Disparities:</h5>
-                    <p className="text-slate-700 leading-relaxed">{comparisonData.aiSynthesis?.responseDifferences}</p>
+                    <div className="prose prose-xs text-slate-700 leading-relaxed max-w-none prose-headings:text-slate-900 prose-a:text-indigo-700 prose-code:text-slate-900">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{formatMarkdownPoints(comparisonData.aiSynthesis?.responseDifferences)}</ReactMarkdown>
+                    </div>
                   </div>
                   <div className="space-y-1">
                     <h5 className="font-bold text-slate-900">Institutional Lessons:</h5>
-                    <p className="text-slate-700 leading-relaxed">{comparisonData.aiSynthesis?.crossEventLessons}</p>
+                    <div className="prose prose-xs text-slate-700 leading-relaxed max-w-none prose-headings:text-slate-900 prose-a:text-indigo-700 prose-code:text-slate-900">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{formatMarkdownPoints(comparisonData.aiSynthesis?.crossEventLessons)}</ReactMarkdown>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -127,9 +153,11 @@ export const CompareModal: React.FC<CompareModalProps> = ({
                         </td>
                         {point.values?.map((v, vIdx) => (
                           <td key={vIdx} className="p-3.5 text-slate-700 align-top leading-relaxed">
-                            {v.value}
+                            <div className="prose prose-xs max-w-none text-slate-700 leading-relaxed prose-headings:text-slate-900 prose-a:text-indigo-700">
+                              <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{formatMarkdownPoints(v.value)}</ReactMarkdown>
+                            </div>
                             {v.citations?.length > 0 && (
-                              <span className="ml-1 text-[10px] font-mono font-bold text-indigo-600">
+                              <span className="mt-1 block text-[10px] font-mono font-bold text-indigo-600">
                                 [{v.citations.join(', ')}]
                               </span>
                             )}

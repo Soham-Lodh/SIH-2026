@@ -8,6 +8,7 @@ import { TeamPage } from './components/TeamPage';
 import { HeroPage } from './components/HeroPage';
 import { AIAssistantDrawer } from './components/past/AIAssistantDrawer';
 import { useAutoTranslatePage } from './hooks/useAutoTranslatePage';
+import { prefetchPastArchive } from './lib/pastCache';
 
 export function App() {
   const [currentRoute, setCurrentRoute] = useState<string>(() =>
@@ -21,6 +22,11 @@ export function App() {
   const [isVoiceAssistantOpen, setIsVoiceAssistantOpen] = useState<boolean>(false);
 
   useAutoTranslatePage(currentLanguage);
+
+  // Prefetch past disaster archives on app mount to prime local cache
+  useEffect(() => {
+    prefetchPastArchive();
+  }, []);
 
   useEffect(() => {
     window.localStorage.setItem('disaster-intelligence.language', currentLanguage);

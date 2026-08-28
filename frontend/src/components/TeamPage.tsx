@@ -55,7 +55,7 @@ export const TeamPage: React.FC = () => {
     {
       name: 'Aaryav Sharma',
       role: 'Machine Learning Engineer',
-      photo: 'https://res.cloudinary.com/ub4y3cag/image/upload/v1787889638/WhatsApp_Image_2026-08-28_at_1.18.01_AM.jpg',
+      photo: 'https://res.cloudinary.com/lugbjbva/image/upload/v1787931004/WhatsApp_Image_2026-08-28_at_8.57.47_PM.jpg',
       location: 'Kolkata, West Bengal',
       bio: 'Specializes in predictive hazard simulation models, USGS earthquake ingestions, and multi-language profanity moderations.',
       isLead: false,
