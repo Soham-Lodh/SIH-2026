@@ -1,4 +1,4 @@
-the import {
+import {
   EvidenceBundle,
   CitedSource,
   TimelineEvent,
