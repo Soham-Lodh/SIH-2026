@@ -257,33 +257,58 @@ export function resolveAlertMapPoint(alert: SachetAlert, index = 0): [number, nu
 }
 
 // Icon mappings for categories
-export function getCategoryIconSvg(category: DisasterCategory | string, severity?: string): string {
-  let color = '#ef4444'; // Red default
-  if (severity === 'Moderate') color = '#f59e0b';
-  if (severity === 'Minor') color = '#3b82f6';
+export function getCategoryIconSvg(category: string, severity?: string): string {
+  const color = '#0F1B29'; // Unified dark slate theme color for all icons
 
-  let iconInner = `<path d="M12 2L2 22h20L12 2z"/><path d="M12 9v4"/><circle cx="12" cy="17" r="1"/>`; // Alert default
-
+  let iconInner = '';
   const catLower = (category || '').toLowerCase();
 
   if (catLower.includes('cyclon') || catLower.includes('storm')) {
-    iconInner = `<path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"/><path d="M12 6a6 6 0 0 0-6 6c0 2 1.5 3.5 3 4s3 2 3 4"/><path d="M12 18a6 6 0 0 0 6-6c0-2-1.5-3.5-3-4s-3-2-3-4"/>`;
+    iconInner = `
+      <path d="M12.8 19.6A2 2 0 1 0 14 16H2" />
+      <path d="M17.5 8a2.5 2.5 0 1 1 2 4H2" />
+      <path d="M9.8 4.4A2 2 0 1 1 11 8H2" />
+    `;
   } else if (catLower.includes('flood') || catLower.includes('inundat')) {
-    iconInner = `<path d="M7 16.3c2.2 0 4-1.83 4-4.05 0-1.16-.57-2.26-1.71-3.19S7.29 6.75 7 5.3c-.29 1.45-1.14 2.84-2.29 3.76S3 11.1 3 12.25c0 2.22 1.8 4.05 4 4.05z"/><path d="M12.56 6.6A10.97 10.97 0 0 0 14 3.02c.5 2.5 2 4.9 4 6.5s3 3.5 3 5.5a6.98 6.98 0 0 1-11.9 4.9"/>`;
+    iconInner = `
+      <path d="M18.4 12A6 6 0 1 0 7.2 9H6a7 7 0 0 0-1 13.9" fill="${color}" fill-opacity="0.1" />
+      <path d="M18.4 12A6 6 0 1 0 7.2 9H6a7 7 0 0 0-1 13.9M12 17l-2 3M16 17l-2 3M8 17l-2 3" stroke-width="2" />
+    `;
   } else if (catLower.includes('earthquake') || catLower.includes('seismic')) {
-    iconInner = `<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>`;
+    iconInner = `
+      <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+    `;
   } else if (catLower.includes('landslide')) {
-    iconInner = `<path d="m8 3 4 8 5-5 5 15H2L8 3z"/>`;
+    iconInner = `
+      <polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2" />
+      <line x1="12" y1="8" x2="12" y2="12" />
+      <line x1="12" y1="16" x2="12.01" y2="16" />
+    `;
   } else if (catLower.includes('heat')) {
-    iconInner = `<circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>`;
+    iconInner = `
+      <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z" />
+    `;
   } else if (catLower.includes('lightning')) {
-    iconInner = `<path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/>`;
+    iconInner = `
+      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+    `;
   } else if (catLower.includes('rain')) {
-    iconInner = `<path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M16 14v6"/><path d="M8 14v6"/><path d="M12 16v6"/>`;
+    iconInner = `
+      <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242" />
+      <path d="M16 14v6" />
+      <path d="M8 14v6" />
+      <path d="M12 16v6" />
+    `;
+  } else {
+    iconInner = `
+      <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+      <line x1="12" y1="9" x2="12" y2="13" />
+      <line x1="12" y1="17" x2="12.01" y2="17" />
+    `;
   }
 
   return `
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="${color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" class="filter drop-shadow-sm">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="filter drop-shadow-sm">
       ${iconInner}
     </svg>
   `;
@@ -394,8 +419,9 @@ export const IndiaLiveMap: React.FC<IndiaLiveMapProps> = ({
       const isExtreme = alert.severity === 'Extreme';
       const isSevere = alert.severity === 'Severe';
 
-      const strokeColor = isSelected ? '#4f46e5' : isExtreme ? '#e11d48' : isSevere ? '#ea580c' : '#d97706';
-      const fillColor = isSelected ? '#6366f1' : isExtreme ? '#f43f5e' : isSevere ? '#f97316' : '#f59e0b';
+      // Unified slate color system to match black/dark gray icons
+      const strokeColor = isSelected ? '#4f46e5' : '#0F1B29';
+      const fillColor = isSelected ? '#e0e7ff' : '#EEF0F2';
 
       // 1. Draw Vector Polygon if present
       if (alert.polygon && alert.polygon.coordinates && alert.polygon.coordinates.length >= 3) {
@@ -441,17 +467,16 @@ export const IndiaLiveMap: React.FC<IndiaLiveMapProps> = ({
       const markerPos = resolveAlertMapPoint(alert, filteredAlerts.indexOf(alert));
 
       if (markerPos) {
+        const ringClass = isSelected
+          ? 'ring-4 ring-indigo-300 ring-offset-2'
+          : 'ring-2 ring-slate-200';
+
         const iconHtml = `
           <div class="relative group cursor-pointer flex flex-col items-center">
-            <div class="w-8 h-8 rounded-2xl bg-white border border-slate-200 shadow-md flex items-center justify-center ${isSelected
-            ? 'ring-4 ring-indigo-300 ring-offset-2'
-            : isExtreme
-              ? 'ring-2 ring-rose-300'
-              : 'ring-1 ring-amber-200'
-          } transition-transform hover:scale-110">
+            <div class="w-8 h-8 rounded-2xl bg-white shadow-md flex items-center justify-center ${ringClass} transition-transform hover:scale-110" style="border: 2px solid ${strokeColor};">
               ${getCategoryIconSvg(alert.category, alert.severity)}
             </div>
-            <div class="mt-1 px-2 py-0.5 rounded-full bg-slate-900 text-[9px] font-bold text-white tracking-tight whitespace-nowrap shadow-sm">
+            <div class="mt-1.5 px-2 py-0.5 rounded-full text-[9px] font-extrabold tracking-tight whitespace-nowrap shadow-sm" style="background-color: ${fillColor}; border: 1.5px solid ${strokeColor}; color: ${strokeColor};">
               ${hazardLabel(language, alert.category)}
             </div>
           </div>
