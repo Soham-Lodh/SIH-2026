@@ -169,7 +169,7 @@ export const FuturePage: React.FC<FuturePageProps> = ({
           },
           body: JSON.stringify({
             month: monthNumber,
-            top_n: 15,
+            top_n: 30,
           }),
         }
       );
