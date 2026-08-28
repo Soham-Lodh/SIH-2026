@@ -1,4 +1,4 @@
-import {
+the import {
   EvidenceBundle,
   CitedSource,
   TimelineEvent,
@@ -145,72 +145,72 @@ const KNOWN_EVENT_ALIASES: Array<{
   match: RegExp;
   event: Omit<NormalizedHistoricalEvent, 'originalQuery'>;
 }> = [
-  {
-    match: /\b(2001\s+)?(gujarat|bhuj|kutch).*(earthquake|quake)|\b(republic day earthquake)\b/i,
-    event: {
-      normalizedQuery: '2001 Gujarat earthquake',
-      aliases: ['Bhuj earthquake', 'Kutch earthquake', 'Republic Day earthquake Gujarat 2001'],
-      disasterType: 'Earthquake',
-      location: 'Bhuj and Kutch',
-      state: 'Gujarat',
-      year: 2001,
-      eventDate: '2001-01-26T00:00:00.000Z',
-      confidence: 0.96,
+    {
+      match: /\b(2001\s+)?(gujarat|bhuj|kutch).*(earthquake|quake)|\b(republic day earthquake)\b/i,
+      event: {
+        normalizedQuery: '2001 Gujarat earthquake',
+        aliases: ['Bhuj earthquake', 'Kutch earthquake', 'Republic Day earthquake Gujarat 2001'],
+        disasterType: 'Earthquake',
+        location: 'Bhuj and Kutch',
+        state: 'Gujarat',
+        year: 2001,
+        eventDate: '2001-01-26T00:00:00.000Z',
+        confidence: 0.96,
+      },
     },
-  },
-  {
-    match: /\b(amphan|amfan)\b/i,
-    event: {
-      normalizedQuery: 'Cyclone Amphan',
-      aliases: ['2020 Cyclone Amphan', 'Amphan West Bengal cyclone'],
-      disasterType: 'Cyclone',
-      location: 'West Bengal and Odisha coast',
-      state: 'West Bengal',
-      year: 2020,
-      eventDate: '2020-05-20T00:00:00.000Z',
-      confidence: 0.95,
+    {
+      match: /\b(amphan|amfan)\b/i,
+      event: {
+        normalizedQuery: 'Cyclone Amphan',
+        aliases: ['2020 Cyclone Amphan', 'Amphan West Bengal cyclone'],
+        disasterType: 'Cyclone',
+        location: 'West Bengal and Odisha coast',
+        state: 'West Bengal',
+        year: 2020,
+        eventDate: '2020-05-20T00:00:00.000Z',
+        confidence: 0.95,
+      },
     },
-  },
-  {
-    match: /\b(wayanad|waynad).*(landslide|landslides)\b/i,
-    event: {
-      normalizedQuery: '2024 Wayanad landslide',
-      aliases: ['Wayanad landslides', 'Chooralmala Mundakkai landslide'],
-      disasterType: 'Landslide',
-      location: 'Wayanad',
-      state: 'Kerala',
-      year: 2024,
-      eventDate: '2024-07-30T00:00:00.000Z',
-      confidence: 0.94,
+    {
+      match: /\b(wayanad|waynad).*(landslide|landslides)\b/i,
+      event: {
+        normalizedQuery: '2024 Wayanad landslide',
+        aliases: ['Wayanad landslides', 'Chooralmala Mundakkai landslide'],
+        disasterType: 'Landslide',
+        location: 'Wayanad',
+        state: 'Kerala',
+        year: 2024,
+        eventDate: '2024-07-30T00:00:00.000Z',
+        confidence: 0.94,
+      },
     },
-  },
-  {
-    match: /\b(1999\s+)?(odisha|orissa).*(super cyclone|cyclone)\b/i,
-    event: {
-      normalizedQuery: '1999 Odisha Super Cyclone',
-      aliases: ['1999 Orissa cyclone', 'Odisha super cyclone'],
-      disasterType: 'Cyclone',
-      location: 'Odisha coast',
-      state: 'Odisha',
-      year: 1999,
-      eventDate: '1999-10-29T00:00:00.000Z',
-      confidence: 0.94,
+    {
+      match: /\b(1999\s+)?(odisha|orissa).*(super cyclone|cyclone)\b/i,
+      event: {
+        normalizedQuery: '1999 Odisha Super Cyclone',
+        aliases: ['1999 Orissa cyclone', 'Odisha super cyclone'],
+        disasterType: 'Cyclone',
+        location: 'Odisha coast',
+        state: 'Odisha',
+        year: 1999,
+        eventDate: '1999-10-29T00:00:00.000Z',
+        confidence: 0.94,
+      },
     },
-  },
-  {
-    match: /\b(2018\s+)?kerala.*flood/i,
-    event: {
-      normalizedQuery: '2018 Kerala floods',
-      aliases: ['Kerala floods 2018'],
-      disasterType: 'Flood',
-      location: 'Kerala',
-      state: 'Kerala',
-      year: 2018,
-      eventDate: '2018-08-15T00:00:00.000Z',
-      confidence: 0.9,
+    {
+      match: /\b(2018\s+)?kerala.*flood/i,
+      event: {
+        normalizedQuery: '2018 Kerala floods',
+        aliases: ['Kerala floods 2018'],
+        disasterType: 'Flood',
+        location: 'Kerala',
+        state: 'Kerala',
+        year: 2018,
+        eventDate: '2018-08-15T00:00:00.000Z',
+        confidence: 0.9,
+      },
     },
-  },
-];
+  ];
 
 function getGroqBaseUrl(): string {
   return process.env.GROQ_BASE_URL?.trim() || 'https://api.groq.com/openai/v1';
@@ -946,7 +946,7 @@ export async function buildHistoricalEvidenceBundle(
     .map(([topic, facts]) => `${topic}: ${facts.length ? facts.join(' | ') : 'none extracted'}`)
     .join('\n');
 
-const systemInstruction = `You are a Senior Disaster Intelligence Research Architect.
+  const systemInstruction = `You are a Senior Disaster Intelligence Research Architect.
 Synthesize the provided disaster evidence strictly using the source documents labeled [S1], [S2], etc.
 ABSOLUTE RULES:
 1. Every factual statement MUST cite its source using [S1], [S2], etc.
@@ -1038,9 +1038,9 @@ Produce a structured historical evidence synthesis in JSON format:
   const cleanConflicts: ConflictingReport[] = [
     ...buildNumericConflictReports(casualtyReconciliation),
     ...(synthesizedData.conflictingReports || []).map((c: any) => ({
-    topic: c.topic || 'Reported Figures',
-    details: validateAndCleanCitations(c.details || '', citedSources),
-    sources: (c.sources || []).filter((sId: string) => citedSources.some((s) => s.id === sId)),
+      topic: c.topic || 'Reported Figures',
+      details: validateAndCleanCitations(c.details || '', citedSources),
+      sources: (c.sources || []).filter((sId: string) => citedSources.some((s) => s.id === sId)),
     })),
   ];
   const eventDate = normalizedEvent.eventDate
@@ -1472,11 +1472,11 @@ export async function buildFilteredIndiaArchive(
 
   const seeds = options.decadeFilter && options.decadeFilter !== 'all'
     ? await discoverEraDisasters({
-        decade: options.decadeFilter,
-        state: options.stateFilter,
-        category: options.categoryFilter,
-        limit: safeLimit,
-      })
+      decade: options.decadeFilter,
+      state: options.stateFilter,
+      category: options.categoryFilter,
+      limit: safeLimit,
+    })
     : [];
   const queries = seeds.length
     ? seeds.map((seed) => `${seed.eventName} ${seed.approxDate}`)
@@ -1624,12 +1624,12 @@ export async function compareDisasterEvents(bundles: EvidenceBundle[]): Promise<
 
   const prompt = `Compare the following ${bundles.length} historical disaster events based solely on their evidence:
 ${bundles
-  .map(
-    (b, i) =>
-      `Event ${i + 1}: ${b.eventName} (${b.disasterType}, ${b.location})\n` +
-      `Impact: ${b.humanImpact}\nDamage: ${b.infrastructureDamage}\nResponse: ${b.governmentResponse}\nSources: ${b.sources.map((s: CitedSource) => `[${s.id}] ${s.title}`).join(', ')}`,
-  )
-  .join('\n\n')}
+      .map(
+        (b, i) =>
+          `Event ${i + 1}: ${b.eventName} (${b.disasterType}, ${b.location})\n` +
+          `Impact: ${b.humanImpact}\nDamage: ${b.infrastructureDamage}\nResponse: ${b.governmentResponse}\nSources: ${b.sources.map((s: CitedSource) => `[${s.id}] ${s.title}`).join(', ')}`,
+      )
+      .join('\n\n')}
 
 Analyze:
 1. Which event had broader human/infrastructure impact?
@@ -1808,7 +1808,7 @@ Provide a professional, cited research answer:`;
   if (!reply) {
     reply = evidenceSources.length > 0
       ? `## Answer\n\nBased on retrieved historical records:\n\n` +
-        evidenceSources.map((s) => `* **${s.title}** (${s.publisher}): ${s.summary} [${s.id}]`).join('\n\n')
+      evidenceSources.map((s) => `* **${s.title}** (${s.publisher}): ${s.summary} [${s.id}]`).join('\n\n')
       : `## Answer\n\nNo sufficiently relevant historical evidence was retrieved for this query after typo and alias normalization.`;
   }
 
