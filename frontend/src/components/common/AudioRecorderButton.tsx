@@ -177,9 +177,14 @@ export const AudioRecorderButton: React.FC<AudioRecorderButtonProps> = ({
           <div className="flex items-center gap-0.5 h-6" aria-label="Recording waveform">
             {waveform.map((height, index) => <span key={index} className="w-0.5 rounded-full bg-rose-500 transition-[height] duration-75" style={{ height }} />)}
           </div>
-          <button type="button" onClick={stopRecording} className={`flex items-center gap-1 px-2 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs transition-all ${className}`} title={translate(language, 'voice.stop', { seconds: recordingDuration })}>
-            <Square className="w-3 h-3 fill-current" />
-            <span>{translate(language, 'voice.stop', { seconds: recordingDuration })}</span>
+          <button
+            type="button"
+            onClick={stopRecording}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white font-bold text-xs transition-colors shadow-xs cursor-pointer border-none shrink-0"
+            title={translate(language, 'voice.stop', { seconds: recordingDuration })}
+          >
+            <Square className="w-3 h-3 fill-current text-white shrink-0" />
+            <span className="text-white font-bold">{translate(language, 'voice.stop', { seconds: recordingDuration })}</span>
           </button>
         </div>
       ) : isTranscribing ? (
