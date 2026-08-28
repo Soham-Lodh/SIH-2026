@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import { Sparkles, Radio, Brain, ShieldAlert } from 'lucide-react';
 import { IndiaMapHero } from './IndiaMapHero';
 import { apiUrl } from '../lib/api';
-
+import { mlApiUrl } from '../lib/mlApi';
 interface HeroPageProps {
   currentLanguage: string;
   onExplore: () => void;
@@ -19,7 +19,7 @@ export const HeroPage: React.FC<HeroPageProps> = ({ currentLanguage, onExplore }
     });
 
     // 2. ML Backend
-    const mlBaseUrl = import.meta.env.VITE_ML_API_BASE_URL;
+    const mlBaseUrl = mlApiUrl('/health');
     if (mlBaseUrl) {
       fetch(mlBaseUrl, { mode: 'no-cors' }).catch(() => {
         // Quiet fail - error tolerant
