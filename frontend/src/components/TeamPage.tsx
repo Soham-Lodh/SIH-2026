@@ -14,7 +14,7 @@ export const TeamPage: React.FC = () => {
   const teamMembers: TeamMember[] = [
     {
       name: 'Soham Lodh',
-      role: 'Machine Learning & Full-Stack Developer',
+      role: 'Machine Learning & Full Stack Developer',
       photo: 'https://res.cloudinary.com/lugbjbva/image/upload/v1787859541/suited.png',
       location: 'Kolkata, West Bengal',
       bio: 'Specializes in predictive hazard simulation models, USGS earthquake ingestions, and multi-language profanity moderations.',
@@ -22,8 +22,8 @@ export const TeamPage: React.FC = () => {
     },
     {
       name: 'Dhrupad Paitandy',
-      role: 'Machine Learning & Full-Stack Developer',
-      photo: 'https://res.cloudinary.com/ub4y3cag/image/upload/v1787888668/WhatsApp_Image_2026-08-28_at_1.14.03_AM.jpg',
+      role: 'Machine Learning & Full Stack Developer',
+      photo: 'https://res.cloudinary.com/ub4y3cag/image/upload/v1787943777/WhatsApp_Image_2026-08-28_at_10.05.31_PM.jpg',
       location: 'Bolpur, West Bengal',
       bio: 'Specializes in predictive hazard simulation models, USGS earthquake ingestions, and multi-language profanity moderations.',
       isLead: false,
@@ -41,7 +41,7 @@ export const TeamPage: React.FC = () => {
       role: 'UI/UX & Frontend Engineer',
       photo: 'https://res.cloudinary.com/ub4y3cag/image/upload/v1787889486/f4a9f840-4375-4a51-bdb9-8abdce717627.jpg ',
       location: 'Bhagalpur, Bihar',
-      bio: 'Crafts responsive Figma-faithful UI interfaces, custom Leaflet styling layers, and animation transitions.',
+      bio: 'Crafts responsive Figma-faithful UI interfaces, animation transitions.',
       isLead: false,
     },
     {
@@ -49,7 +49,7 @@ export const TeamPage: React.FC = () => {
       role: 'Machine Learning Engineer',
       photo: 'https://res.cloudinary.com/ub4y3cag/image/upload/v1787888706/3b628aaf-4303-4568-8b7a-eb281efa5692.jpg',
       location: 'Kolkata, West Bengal',
-      bio: 'Crafts responsive Figma-faithful UI interfaces, custom Leaflet styling layers, and animation transitions.',
+      bio: 'Hi! I’m curious, slightly competitive, and always up for trying something new…even if I have no idea what I’m doing at first.',
       isLead: false,
     },
     {
@@ -57,7 +57,7 @@ export const TeamPage: React.FC = () => {
       role: 'Machine Learning Engineer',
       photo: 'https://res.cloudinary.com/lugbjbva/image/upload/v1787931004/WhatsApp_Image_2026-08-28_at_8.57.47_PM.jpg',
       location: 'Kolkata, West Bengal',
-      bio: 'Specializes in predictive hazard simulation models, USGS earthquake ingestions, and multi-language profanity moderations.',
+      bio: 'Hey everyone, I’m into music, playing guitar, and chess, and always up for learning something new!',
       isLead: false,
     },
   ];
