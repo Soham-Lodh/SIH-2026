@@ -10,7 +10,6 @@ import { apiUrl } from '../../lib/api';
 import { formatDisasterDate } from '../../lib/dateFormat';
 import { translateText } from '../../lib/googleTranslate';
 import { useTranslateContent } from '../../hooks/useTranslateContent';
-import { getPastArchive } from '../../lib/pastCache';
 import {
   Search,
   Sparkles,
@@ -160,7 +159,13 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
       setArchiveError(null);
 
       try {
-        const data = await getPastArchive();
+        const res = await fetch(apiUrl('/api/past/archive'));
+        const data = await res.json().catch(() => null);
+
+        if (!res.ok) {
+          throw new Error(data?.details || data?.error || 'Failed to load recent archive');
+        }
+
         const items = Array.isArray(data?.items) ? data.items : [];
         if (cancelled) return;
 
@@ -237,7 +242,11 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
     setIsArchiveLoading(true);
 
     try {
-      const data = await getPastArchive();
+      const res = await fetch(apiUrl('/api/past/archive'));
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(data?.details || data?.error || 'Failed to reset archive filters');
+      }
       setEvidenceBundles(Array.isArray(data?.items) ? data.items : []);
     } catch (error) {
       setArchiveError((error as Error).message || 'Failed to reset archive filters');
@@ -879,4 +888,3 @@ export const PastWorkspace: React.FC<PastWorkspaceProps> = ({
     </div>
   );
 };
-
