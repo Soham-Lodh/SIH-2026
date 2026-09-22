@@ -70,6 +70,7 @@ app.add_middleware(
         "http://localhost:3000",
         "http://localhost:5173",
         "https://sih-2026-bay.vercel.app",
+        "https://aapda-drishti.antideploy.com"
     ],
 
     allow_credentials=True,

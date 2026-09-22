@@ -560,7 +560,7 @@ export const FuturePage: React.FC<
 
   const mlApiUrl =
     import.meta.env.VITE_ML_API_BASE_URL ||
-    'http://127.0.0.1:8000';
+    'https://sih-2026-kg5u.onrender.com';
 
   // ==========================================================
   // INITIALIZE MAP
