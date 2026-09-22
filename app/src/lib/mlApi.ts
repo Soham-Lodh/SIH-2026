@@ -1,4 +1,4 @@
-const ML_API_BASE_URL = (import.meta.env.VITE_ML_API_BASE_URL || '').trim();
+const ML_API_BASE_URL = (import.meta.env.VITE_ML_API_BASE_URL || 'https://sih-2026-kg5u.onrender.com').trim();
 
 function stripTrailingSlashes(value: string): string {
   return value.replace(/\/+$/, '');

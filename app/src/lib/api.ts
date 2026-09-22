@@ -1,4 +1,4 @@
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').trim();
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'https://sih-2026-tsf9.onrender.com').trim();
 function stripTrailingSlashes(value: string): string {
   return value.replace(/\/+$/, '');
 }
